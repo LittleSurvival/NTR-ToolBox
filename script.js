@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NTR ToolBox
 // @namespace    http://tampermonkey.net/
-// @version      v0.2.4-20250223
+// @version      v0.3-20250223
 // @author       TheNano(百合仙人)
 // @description  ToolBox for Novel Translate bot website
 // @match        https://books.fishhawk.top/*
@@ -123,7 +123,7 @@
         return found ? found.value : undefined;
     }
 
-    const CONFIG_VERSION = 10;
+    const CONFIG_VERSION = 11;
     const CONFIG_STORAGE_KEY = 'NTR_ToolBox_Config';
     const domainAllowed = ['books.fishhawk.top', 'books1.fishhawk.top'].includes(location.hostname);
 
@@ -337,7 +337,8 @@
             const mode = getModuleSetting(configObj, '模式');
             const modeMap = { '常規': '常规', '過期': '过期', '重翻': '重翻' };
             const cnMode = modeMap[mode] || '常规';
-            function setMode(doc) {
+
+            async function setMode(doc) {
                 const tags = doc.querySelectorAll('.n-tag__content');
                 for (const tag of tags) {
                     if (tag.textContent.trim() === cnMode) {
@@ -382,7 +383,7 @@
                     throw new Error(`Failed to open new tab for: ${url}`);
                 }
                 await waitForTabLoad(newTab);
-                setMode(newTab.document);
+                await setMode(newTab.document);
                 await clickSakuraButtons(newTab.document);
                 newTab.close();
             }
@@ -515,7 +516,6 @@
         whitelist: '/workspace/*',
         settings: [
             newNumberSetting('最大重試次數', 3),
-            newStringSetting('bind', 'none'),
         ],
         _keepIntervalId: null,
         _keepActive: false,
@@ -566,6 +566,57 @@
         }
     };
 
+    const moduleCacheOptimization = {
+        name: '緩存優化',
+        type: 'keep',
+        whitelist: '',
+        settings: [
+            newNumberSetting('同步間隔', 100)
+        ],
+        run: async function(configObj) {
+            const interval = getModuleSetting(configObj, '同步間隔') || 1000;
+            const origSession = window.sessionStorage;
+            try {
+                const proxyStorage = new Proxy(origSession, {
+                    get(target, prop) {
+                        if (typeof prop === 'string') {
+                            let val = target[prop];
+                            if (val === undefined) {
+                                val = localStorage.getItem(prop);
+                                if (val !== null) target.setItem(prop, val);
+                            }
+                            return val;
+                        }
+                        return target[prop];
+                    },
+                    set(target, prop, value) {
+                        target[prop] = value;
+                        localStorage.setItem(prop, value);
+                        return true;
+                    }
+                });
+                Object.defineProperty(window, 'sessionStorage', { value: proxyStorage, configurable: true });
+            } catch(e) {}
+            setInterval(() => {
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    const localVal = localStorage.getItem(key);
+                    const sessVal = origSession[key];
+                    if (sessVal !== localVal) {
+                        origSession[key] = localVal;
+                        try {
+                            window.dispatchEvent(new StorageEvent('storage', {
+                                key: key,
+                                newValue: localVal,
+                                storageArea: origSession
+                            }));
+                        } catch (e) {}
+                    }
+                }
+            }, interval);
+        }
+    };    
+
     const defaultModules = [
         moduleAddSakuraTranslator,
         moduleAddGPTTranslator,
@@ -574,6 +625,7 @@
         moduleQueueSakura,
         moduleQueueGPT,
         moduleAutoRetry,
+        moduleCacheOptimization,
     ];
 
     function loadConfiguration() {
@@ -584,7 +636,20 @@
         if (!tempStorage || tempStorage.version !== CONFIG_VERSION) {
             return { version: CONFIG_VERSION, modules: JSON.parse(JSON.stringify(defaultModules)) };
         }
-        return tempStorage;
+
+        const loadedModules = JSON.parse(JSON.stringify(defaultModules));
+        tempStorage.modules.forEach(storedModule => {
+            const defaultModule = loadedModules.find(mod => mod.name === storedModule.name);
+            if (defaultModule) {
+                for (const key in storedModule) {
+                    if (defaultModule.hasOwnProperty(key) && typeof defaultModule[key] === typeof storedModule[key] && storedModule[key] !== undefined) {
+                        defaultModule[key] = storedModule[key];
+                    }
+                }
+            }
+        });
+
+        return { version: CONFIG_VERSION, modules: loadedModules };
     }
     function saveConfiguration(obj) {
         localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(obj));
@@ -616,6 +681,15 @@
 
     const keepIntervals = new Map();
     const keepActiveSet = new Set();
+
+    function updateKeepStateStorage() {
+        const state = {};
+        keepActiveSet.forEach(moduleName => {
+            state[moduleName] = true;
+        });
+        localStorage.setItem('NTR_KeepState', JSON.stringify(state));
+    }
+
     function startKeepModule(modItem, modHeader) {
         if (keepIntervals.has(modItem.name)) return;
         modHeader.classList.add('active');
@@ -627,6 +701,7 @@
             }
         }, 2000);
         keepIntervals.set(modItem.name, intervalId);
+        updateKeepStateStorage();
     }
     function stopKeepModule(modItem, modHeader) {
         const intervalId = keepIntervals.get(modItem.name);
@@ -636,6 +711,7 @@
         }
         modHeader.classList.remove('active');
         keepActiveSet.delete(modItem.name);
+        updateKeepStateStorage();
     }
 
     document.addEventListener('keydown', keyEvent => {
@@ -678,7 +754,7 @@
     }
     function mouseUpHandler() {
         dragging = false;
-        localStorage.setItem('ntr-panel-position', JSON.stringify({
+        localStorage.setItem('NTR-Panel-Position', JSON.stringify({
             left: panel.style.left,
             top: panel.style.top
         }));
@@ -739,6 +815,7 @@
         const settingsContainer = document.createElement('div');
         settingsContainer.className = 'ntr-settings-container';
         settingsContainer.style.display = 'none';
+
         moduleHeader.oncontextmenu = function (e) {
             e.preventDefault();
             const currentDisplay = settingsContainer.style.display || window.getComputedStyle(settingsContainer).display;
@@ -845,13 +922,38 @@
         headerMap.set(modItem, moduleHeader);
     });
 
+    // New: load keep module state from storage and auto-start
+    function updateKeepStateStorage() {
+        const state = {};
+        keepActiveSet.forEach(moduleName => {
+            state[moduleName] = true;
+        });
+        localStorage.setItem('NTR_KeepState', JSON.stringify(state));
+    }
+    function loadKeepStateStorage() {
+        try {
+            return JSON.parse(localStorage.getItem('NTR_KeepState') || '{}');
+        } catch(e) {
+            return {};
+        }
+    }
+    const savedKeepState = loadKeepStateStorage();
+    configuration.modules.forEach(mod => {
+        if (mod.type === 'keep' && savedKeepState[mod.name]) {
+            const modHeader = headerMap.get(mod);
+            if (modHeader) {
+                startKeepModule(mod, modHeader);
+            }
+        }
+    });
+
     const infoText = document.createElement('div');
     infoText.className = 'ntr-info';
     infoText.textContent = '左鍵執行/切換 | 右鍵設定';
     panel.appendChild(infoText);
     document.body.appendChild(panel);
 
-    setInterval(() => {
+    const updateModuleVisibility = () => {
         configuration.modules.forEach(m => {
             const moduleHeader = headerMap.get(m);
             if (!moduleHeader) return;
@@ -864,5 +966,7 @@
                 moduleContainer.style.display = 'block';
             }
         });
-    }, 1000);
+    };
+    updateModuleVisibility();
+    setInterval(updateModuleVisibility, 250);
 })();
