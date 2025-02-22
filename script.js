@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         NTR ToolBox
 // @namespace    http://tampermonkey.net/
-// @version      v0.2.2-20250223
+// @version      v0.2.4-20250223
 // @author       TheNano(百合仙人)
 // @description  ToolBox for Novel Translate bot website
 // @match        https://books.fishhawk.top/*
 // @match        https://books1.fishhawk.top/*
-// @grant        none
+// @grant        GM_openInTab
 // @icon         https://raw.githubusercontent.com/LittleSurvival/NTRTools/refs/heads/main/icon.jpg
 // @license      All Rights Reserved
 // 
@@ -123,7 +123,7 @@
         return found ? found.value : undefined;
     }
 
-    const CONFIG_VERSION = 7;
+    const CONFIG_VERSION = 10;
     const CONFIG_STORAGE_KEY = 'NTR_ToolBox_Config';
     const domainAllowed = ['books.fishhawk.top', 'books1.fishhawk.top'].includes(location.hostname);
 
@@ -135,7 +135,7 @@
             newNumberSetting('數量', 5),
             newNumberSetting('延遲', 5),
             newStringSetting('名稱', 'NTR translator '),
-            newStringSetting('鏈接', 'https://127.0.0.1:8080'),
+            newStringSetting('鏈接', 'https://sakura-share.one'),
             newStringSetting('bind', 'none'),
         ],
         run: async function (configObj) {
@@ -325,69 +325,191 @@
         whitelist: '/wenku',
         settings: [
             newSelectSetting('模式', ['常規', '過期', '重翻'], '常規'),
+            newNumberSetting('延遲間隔', 50),
+            newNumberSetting('並行延遲', 1000),
+            newNumberSetting('並行數量', 5),
             newStringSetting('bind', 'none'),
         ],
-        run: async function (configObj) {
+        run: async function(configObj) {
+            const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+            const pollInterval  = getModuleSetting(configObj, '並行延遲') || 300;
+            const concurrentLimit = getModuleSetting(configObj, '並行數量') || 5;
             const mode = getModuleSetting(configObj, '模式');
-            const delay = ms => new Promise(r => setTimeout(r, ms));
-            const modeMap = {
-                '常規': '常规',
-                '過期': '过期',
-                '重翻': '重翻'
-            };
-            const cnMode = modeMap[mode];
-            const tags = document.querySelectorAll('.n-tag__content');
-            for (const tag of tags) {
-                if (tag.textContent === cnMode) {
-                    tag.click();
-                    break;
+            const modeMap = { '常規': '常规', '過期': '过期', '重翻': '重翻' };
+            const cnMode = modeMap[mode] || '常规';
+            function setMode(doc) {
+                const tags = doc.querySelectorAll('.n-tag__content');
+                for (const tag of tags) {
+                    if (tag.textContent.trim() === cnMode) {
+                        tag.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+                        break;
+                    }
                 }
             }
-            const allButtons = document.querySelectorAll('button');
-            for (const btn of allButtons) {
-                if (btn.textContent.includes('排队Sakura')) {
-                    btn.click();
-                    await delay(10);
+            async function clickSakuraButtons(doc) {
+                const btns = Array.from(doc.querySelectorAll('button')).filter(b => b.textContent.includes('排队Sakura'));
+                btns.forEach(btn => btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true})));
+            }
+            if (location.pathname !== '/wenku') {
+                setMode(document);
+                await clickSakuraButtons(document);
+                return;
+            }
+            const domain = window.location.origin;
+            const allLinks = Array.from(document.querySelectorAll('a[href]'))
+              .map(a => a.href)
+              .filter(href => href.startsWith(domain) && /\/wenku\/[^/]+/.test(href));
+            const uniqueLinks = [...new Set(allLinks)];
+            async function waitForTabLoad(newTab) {
+                const maxWait = 10000;
+                const startTime = Date.now();
+                while (true) {
+                    await delay(pollInterval);
+                    if (!newTab || newTab.closed) {
+                        throw new Error('New tab was closed or blocked before loading.');
+                    }
+                    if (newTab.document && (newTab.document.readyState === 'complete' || newTab.document.querySelector('.n-tag__content'))) {
+                        break;
+                    }
+                    if (Date.now() - startTime > maxWait) {
+                        throw new Error('Timed out waiting for new tab to load.');
+                    }
                 }
             }
+            async function processUrl(url) {
+                const newTab = window.open(url, '_blank');
+                if (!newTab) {
+                    throw new Error(`Failed to open new tab for: ${url}`);
+                }
+                await waitForTabLoad(newTab);
+                setMode(newTab.document);
+                await clickSakuraButtons(newTab.document);
+                newTab.close();
+            }
+            let activeCount = 0;
+            let index = 0;
+            async function spawnNext() {
+                if (index >= uniqueLinks.length) return;
+                const url = uniqueLinks[index++];
+                activeCount++;
+                try {
+                    await processUrl(url);
+                } catch (err) {
+                    console.error('Failed to process:', url, err);
+                } finally {
+                    activeCount--;
+                }
+            }
+            while (index < uniqueLinks.length) {
+                if (activeCount < concurrentLimit) {
+                    spawnNext();
+                } else {
+                    await delay(50);
+                }
+            }
+            while (activeCount > 0) {
+                await delay(50);
+            }
+            console.log('All Sakura tasks complete.');
         }
     };
-
+    
     const moduleQueueGPT = {
         name: '排隊GPT',
         type: 'onclick',
         whitelist: '/wenku',
         settings: [
             newSelectSetting('模式', ['常規', '過期', '重翻'], '常規'),
+            newNumberSetting('延遲間隔', 5),
+            newNumberSetting('並行延遲', 300),
+            newNumberSetting('並行數量', 5),
             newStringSetting('bind', 'none'),
         ],
-        run: async function (configObj) {
+        run: async function(configObj) {
+            const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+            const pollInterval  = getModuleSetting(configObj, '並行延遲') || 300;
+            const concurrentLimit = getModuleSetting(configObj, '並行數量') || 5;
             const mode = getModuleSetting(configObj, '模式');
-            const delay = ms => new Promise(r => setTimeout(r, ms));
-            const modeMap = {
-                '常規': '常规',
-                '過期': '过期',
-                '重翻': '重翻'
-            };
-            const cnMode = modeMap[mode];
-            const tags = document.querySelectorAll('.n-tag__content');
-            for (const tag of tags) {
-                if (tag.textContent === cnMode) {
-                    tag.click();
-                    break;
+            const modeMap = { '常規': '常规', '過期': '过期', '重翻': '重翻' };
+            const cnMode = modeMap[mode] || '常规';
+            function setMode(doc) {
+                const tags = doc.querySelectorAll('.n-tag__content');
+                for (const tag of tags) {
+                    if (tag.textContent.trim() === cnMode) {
+                        tag.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+                        break;
+                    }
                 }
             }
-            const allButtons = document.querySelectorAll('button');
-            for (const btn of allButtons) {
-                if (btn.textContent.includes('排队GPT')) {
-                    btn.click();
-                    await delay(10);
+            async function clickGPTButtons(doc) {
+                const btns = Array.from(doc.querySelectorAll('button')).filter(b => b.textContent.includes('排队GPT'));
+                btns.forEach(btn => btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true})));
+            }
+            if (location.pathname !== '/wenku') {
+                setMode(document);
+                await clickGPTButtons(document);
+                return;
+            }
+            const domain = window.location.origin;
+            const allLinks = Array.from(document.querySelectorAll('a[href]'))
+              .map(a => a.href)
+              .filter(href => href.startsWith(domain) && /\/wenku\/[^/]+/.test(href));
+            const uniqueLinks = [...new Set(allLinks)];
+            async function waitForTabLoad(newTab) {
+                const maxWait = 10000;
+                const startTime = Date.now();
+                while (true) {
+                    await delay(pollInterval);
+                    if (!newTab || newTab.closed) {
+                        throw new Error('New tab was closed or blocked before loading.');
+                    }
+                    if (newTab.document && (newTab.document.readyState === 'complete' || newTab.document.querySelector('.n-tag__content'))) {
+                        break;
+                    }
+                    if (Date.now() - startTime > maxWait) {
+                        throw new Error('Timed out waiting for new tab to load.');
+                    }
                 }
             }
+            async function processUrl(url) {
+                const newTab = window.open(url, '_blank');
+                if (!newTab) {
+                    throw new Error(`Failed to open new tab for: ${url}`);
+                }
+                await waitForTabLoad(newTab);
+                setMode(newTab.document);
+                await clickGPTButtons(newTab.document);
+                newTab.close();
+            }
+            let activeCount = 0;
+            let index = 0;
+            async function spawnNext() {
+                if (index >= uniqueLinks.length) return;
+                const url = uniqueLinks[index++];
+                activeCount++;
+                try {
+                    await processUrl(url);
+                } catch (err) {
+                    console.error('Failed to process:', url, err);
+                } finally {
+                    activeCount--;
+                }
+            }
+            while (index < uniqueLinks.length) {
+                if (activeCount < concurrentLimit) {
+                    spawnNext();
+                } else {
+                    await delay(50);
+                }
+            }
+            while (activeCount > 0) {
+                await delay(50);
+            }
+            console.log('All GPT tasks complete.');
         }
-    };
+    };    
 
-    const moduleKeepExample = {
+    const moduleAutoRetry = {
         name: '自動重試',
         type: 'keep',
         whitelist: '/workspace/*',
@@ -451,7 +573,7 @@
         moduleLaunchTranslator,
         moduleQueueSakura,
         moduleQueueGPT,
-        moduleKeepExample
+        moduleAutoRetry,
     ];
 
     function loadConfiguration() {
@@ -603,7 +725,6 @@
 
     const headerMap = new Map();
     configuration.modules.forEach(modItem => {
-
         const moduleContainer = document.createElement('div');
         moduleContainer.className = 'ntr-module-container';
         const moduleHeader = document.createElement('div');
