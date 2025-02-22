@@ -96,162 +96,313 @@
         color: #888;
         margin-top: 8px;
     }
+    .ntr-module-header.active {
+        background: #63E2B7 !important;
+        color: #fff !important;
+    }
     `;
     document.head.appendChild(style);
 
-    function newBooleanSetting(settingName, defaultValue) {
-        return { name: settingName, type: 'boolean', value: Boolean(defaultValue) };
+    function newBooleanSetting(nameDefault, boolDefault) {
+        return { name: nameDefault, type: 'boolean', value: Boolean(boolDefault) };
     }
-    function newNumberSetting(settingName, defaultValue) {
-        return { name: settingName, type: 'number', value: Number(defaultValue || 0) };
+    function newNumberSetting(nameDefault, numDefault) {
+        return { name: nameDefault, type: 'number', value: Number(numDefault || 0) };
     }
-    function newStringSetting(settingName, defaultValue) {
-        return { name: settingName, type: 'string', value: String(defaultValue == null ? '' : defaultValue) };
+    function newStringSetting(nameDefault, strDefault) {
+        return { name: nameDefault, type: 'string', value: String(strDefault == null ? '' : strDefault) };
     }
-    function getModuleSetting(moduleConfig, key) {
-        if (!moduleConfig.settings) return undefined;
-        const setting = moduleConfig.settings.find(s => s.name === key);
-        return setting ? setting.value : undefined;
+    function newSelectSetting(nameDefault, arrOptions, valDefault) {
+        return { name: nameDefault, type: 'select', value: valDefault, options: arrOptions };
+    }
+    function getModuleSetting(moduleObj, key) {
+        if (!moduleObj.settings) return;
+        const found = moduleObj.settings.find(x => x.name === key);
+        return found ? found.value : undefined;
     }
 
-    const CONFIG_VERSION = 3;
+    const CONFIG_VERSION = 4;
     const CONFIG_STORAGE_KEY = 'NTR_ToolBox_Config';
     const domainAllowed = ['books.fishhawk.top', 'books1.fishhawk.top'].includes(location.hostname);
 
-    // Module: 添加翻譯器
-    const moduleAddTranslator = {
-        name: '添加翻譯器',
+    const moduleAddSakuraTranslator = {
+        name: '添加Sakura翻譯器',
+        type: 'onclick',
+        whitelist: '/workspace/sakura',
         settings: [
             newNumberSetting('數量', 5),
             newStringSetting('名稱', 'NTR translator '),
             newStringSetting('鏈接', 'https://127.0.0.1:8080'),
-            newStringSetting('bind', 'none')
+            newStringSetting('bind', 'none'),
+            newSelectSetting('模式', ['mode1', 'mode2', 'mode3'], 'mode1')
         ],
-        run: async function (moduleConfig) {
-            const totalTranslators = getModuleSetting(moduleConfig, '數量') || 1;
-            const namePrefix = getModuleSetting(moduleConfig, '名稱') || '';
-            const translatorLink = getModuleSetting(moduleConfig, '鏈接') || '';
-            const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+        run: async function (configObj) {
+            const totalCount = getModuleSetting(configObj, '數量') || 1;
+            const namePrefix = getModuleSetting(configObj, '名稱') || '';
+            const linkValue = getModuleSetting(configObj, '鏈接') || '';
+            const delay = ms => new Promise(r => setTimeout(r, ms));
             let currentIndex = 1;
-            async function closeTranslatorTab() {
+            async function closeTab() {
                 const closeButton = document.querySelector(
                     'button[aria-label="close"].n-base-close,button.n-base-close[aria-label="close"],button.n-base-close.n-base-close--absolute.n-card-header__close'
                 );
                 if (closeButton) closeButton.click();
             }
-            async function openAddTranslatorTab() {
-                const button = Array.prototype.slice
-                    .call(document.querySelectorAll('button.n-button'))
+            async function openAddTab() {
+                const addBtn = [...document.querySelectorAll('button.n-button')]
                     .find(btn => {
-                        const text = (btn.querySelector('.n-button__content') || {}).textContent || '';
-                        return text.trim().indexOf('添加翻译器') !== -1;
+                        const txt = (btn.querySelector('.n-button__content') || {}).textContent || '';
+                        return txt.trim().indexOf('添加翻译器') !== -1;
                     });
-                if (button) button.click();
+                if (addBtn) addBtn.click();
             }
             async function fillForm() {
                 const nameInput = document.querySelector('input.n-input__input-el[placeholder="给你的翻译器起个名字"]');
                 const linkInput = document.querySelector('input.n-input__input-el[placeholder="翻译器的链接"]');
-                const segmentInput = document.querySelectorAll('input.n-input__input-el[placeholder="请输入"]')[0];
-                const prefixInput = document.querySelectorAll('input.n-input__input-el[placeholder="请输入"]')[1];
-                const addButton = Array.prototype.slice
-                    .call(document.querySelectorAll('button.n-button.n-button--primary-type'))
+                const segInput = document.querySelectorAll('input.n-input__input-el[placeholder="请输入"]')[0];
+                const preInput = document.querySelectorAll('input.n-input__input-el[placeholder="请输入"]')[1];
+                const addBtn = [...document.querySelectorAll('button.n-button.n-button--primary-type')]
                     .find(btn => {
-                        const text = (btn.querySelector('.n-button__content') || {}).textContent || '';
-                        return text.trim().indexOf('添加') !== -1;
+                        const txt = (btn.querySelector('.n-button__content') || {}).textContent || '';
+                        return txt.trim().indexOf('添加') !== -1;
                     });
-                if (nameInput && linkInput && segmentInput && prefixInput && addButton) {
+                if (nameInput && linkInput && segInput && preInput && addBtn) {
                     nameInput.value = namePrefix + currentIndex;
                     nameInput.dispatchEvent(new Event('input', { bubbles: true }));
-                    linkInput.value = translatorLink;
+                    linkInput.value = linkValue;
                     linkInput.dispatchEvent(new Event('input', { bubbles: true }));
-                    segmentInput.dispatchEvent(new InputEvent('input', { data: '500' }));
-                    prefixInput.dispatchEvent(new InputEvent('input', { data: '500' }));
-                    addButton.click();
+                    segInput.dispatchEvent(new InputEvent('input', { data: '500' }));
+                    preInput.dispatchEvent(new InputEvent('input', { data: '500' }));
+                    addBtn.click();
                     currentIndex++;
-                    if (currentIndex <= totalTranslators) {
-                        await delay(200);
-                        await openAddTranslatorTab();
+                    if (currentIndex <= totalCount) {
                         await delay(100);
                         await fillForm();
                     }
                 }
             }
-            await openAddTranslatorTab();
-            await delay(100);
+            await openAddTab();
+            await delay(300);
             await fillForm();
             await delay(100);
-            await closeTranslatorTab();
+            await closeTab();
         }
     };
 
-    // Module: 刪除翻譯器
+    const moduleAddGPTTranslator = {
+        name: '添加GPT翻譯器',
+        type: 'onclick',
+        whitelist: '/workspace/gpt',
+        settings: [
+            newNumberSetting('數量', 5),
+            newStringSetting('名稱', 'NTR translator '),
+            newStringSetting('模型', 'deepseek-chat'),
+            newStringSetting('鏈接', 'https://api.deepseek.com'),
+            newStringSetting('Key', 'sk-wait-for-input'),
+            newStringSetting('bind', 'none'),
+            newSelectSetting('模式', ['mode1', 'mode2', 'mode3'], 'mode1')
+        ],
+        run: async function (configObj) {
+            const countVal = getModuleSetting(configObj, '數量') || 1;
+            const namePrefixVal = getModuleSetting(configObj, '名稱') || '';
+            const modelVal = getModuleSetting(configObj, '模型') || '';
+            const apiKeyVal = getModuleSetting(configObj, 'Key') || '';
+            const apiUrlVal = getModuleSetting(configObj, '鏈接') || '';
+            const delay = ms => new Promise(r => setTimeout(r, ms));
+            let currentIndex = 1;
+            async function closeTab() {
+                const cBtn = document.querySelector(
+                    'button[aria-label="close"].n-base-close,button.n-base-close[aria-label="close"],button.n-base-close.n-base-close--absolute.n-card-header__close'
+                );
+                if (cBtn) cBtn.click();
+            }
+            async function openAddTab() {
+                const addBtn = [...document.querySelectorAll('button.n-button')]
+                    .find(btn => {
+                        const txt = (btn.querySelector('.n-button__content') || {}).textContent || '';
+                        return txt.trim().indexOf('添加翻译器') !== -1;
+                    });
+                if (addBtn) addBtn.click();
+            }
+            async function fillForm() {
+                const nameInput = document.querySelector('input.n-input__input-el[placeholder="给你的翻译器起个名字"]');
+                const modelInput = document.querySelector('input.n-input__input-el[placeholder="模型名称"]');
+                const urlInput = document.querySelector('input.n-input__input-el[placeholder="兼容OpenAI的API链接，默认使用deepseek"]');
+                const keyInput = document.querySelector('input.n-input__input-el[placeholder="请输入Api key"]');
+                const confirmBtn = [...document.querySelectorAll('button.n-button.n-button--primary-type')]
+                    .find(btn => {
+                        const txt = (btn.querySelector('.n-button__content') || {}).textContent || '';
+                        return txt.trim().indexOf('添加') !== -1;
+                    });
+                if (nameInput && modelInput && urlInput && keyInput && confirmBtn) {
+                    nameInput.value = namePrefixVal + currentIndex;
+                    nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    modelInput.value = modelVal;
+                    modelInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    urlInput.value = apiUrlVal;
+                    urlInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    keyInput.value = apiKeyVal;
+                    keyInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    confirmBtn.click();
+                    currentIndex++;
+                    if (currentIndex <= countVal) {
+                        await delay(200);
+                        await fillForm();
+                    }
+                }
+            }
+            await openAddTab();
+            await delay(300);
+            await fillForm();
+            await delay(100);
+            await closeTab();
+        }
+    };
+
     const moduleDeleteTranslator = {
         name: '刪除翻譯器',
+        type: 'onclick',
+        whitelist: '/workspace',
         settings: [
-            newStringSetting('exclude', '共享,本机,AutoDL'),
-            newStringSetting('bind', 'none')
+            newStringSetting('排除', '共享,本机,AutoDL'),
+            newStringSetting('bind', 'none'),
+            newSelectSetting('模式', ['mode1', 'mode2', 'mode3'], 'mode1')
         ],
-        run: async function (moduleConfig) {
-            const excludeString = getModuleSetting(moduleConfig, 'exclude') || '';
-            const excludeList = excludeString.split(',').filter(item => item);
-            const moduleItems = document.querySelectorAll('.n-list-item');
-            Array.prototype.forEach.call(moduleItems, item => {
-                const titleElement = item.querySelector('.n-thing-header__title');
-                if (!titleElement) return;
-                const titleText = titleElement.textContent.trim();
-                const shouldKeep = excludeList.some(exclude => titleText.indexOf(exclude) !== -1);
-                if (!shouldKeep) {
-                    const deleteButton = item.querySelector('.n-button--error-type');
-                    if (deleteButton) deleteButton.click();
+        run: async function (configObj) {
+            const excludeStr = getModuleSetting(configObj, '排除') || '';
+            const excludeArr = excludeStr.split(',').filter(x => x);
+            const listItems = document.querySelectorAll('.n-list-item');
+            [...listItems].forEach(li => {
+                const titleEl = li.querySelector('.n-thing-header__title');
+                if (!titleEl) return;
+                const titleText = titleEl.textContent.trim();
+                const keep = excludeArr.some(x => titleText.indexOf(x) !== -1);
+                if (!keep) {
+                    const delBtn = li.querySelector('.n-button--error-type');
+                    const parentEl = delBtn?.parentElement;
+                    if (parentEl) {
+                        const siblingBtns = parentEl.querySelectorAll('button');
+                        if (siblingBtns.length === 5 && delBtn) delBtn.click();
+                    }
                 }
             });
         }
     };
 
-    // Module: 啟動翻譯器
     const moduleLaunchTranslator = {
         name: '啟動翻譯器',
+        type: 'onclick',
+        whitelist: '/workspace',
         settings: [
             newNumberSetting('延遲間隔', 50),
-            newStringSetting('bind', 'none')
+            newStringSetting('bind', 'none'),
+            newSelectSetting('模式', ['mode1', 'mode2', 'mode3'], 'mode1')
         ],
-        run: async function (moduleConfig) {
-            const delayInterval = getModuleSetting(moduleConfig, '延遲間隔') || 50;
-            const allButtons = document.querySelectorAll('button');
-            const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-            let buttonIndex = 0;
-            async function clickNextButton() {
-                while (buttonIndex < allButtons.length) {
-                    const button = allButtons[buttonIndex];
-                    buttonIndex++;
-                    if (button.textContent.indexOf('启动') !== -1 || button.textContent.indexOf('啟動') !== -1) {
-                        button.click();
-                        await delay(delayInterval);
+        run: async function (configObj) {
+            const intervalVal = getModuleSetting(configObj, '延遲間隔') || 50;
+            const allBtns = document.querySelectorAll('button');
+            const delay = ms => new Promise(r => setTimeout(r, ms));
+            let idx = 0;
+            async function nextClick() {
+                while (idx < allBtns.length) {
+                    const btn = allBtns[idx];
+                    idx++;
+                    if (btn.textContent.indexOf('启动') !== -1 || btn.textContent.indexOf('啟動') !== -1) {
+                        btn.click();
+                        await delay(intervalVal);
                     }
                 }
             }
-            await clickNextButton();
+            await nextClick();
         }
     };
 
+    const moduleQueueSakura = {
+        name: '排隊Sakura',
+        type: 'onclick',
+        whitelist: '/wenku',
+        settings: [
+            newSelectSetting('模式', ['常規', '過期', '重翻'], '常規'),
+            newStringSetting('bind', 'none'),
+        ],
+        run: async function (configObj) {
+            const mode = getModuleSetting(configObj, '模式');
+            const delay = ms => new Promise(r => setTimeout(r, ms));
+            const modeMap = {
+                '常規': '常规',
+                '過期': '过期',
+                '重翻': '重翻'
+            };
+            const cnMode = modeMap[mode];
+            const tags = document.querySelectorAll('.n-tag__content');
+            for (const tag of tags) {
+                if (tag.textContent === cnMode) {
+                    tag.click();
+                    break;
+                }
+            }
+            const allButtons = document.querySelectorAll('button');
+            for (const btn of allButtons) {
+                if (btn.textContent.includes('排队Sakura')) {
+                    btn.click();
+                    await delay(10);
+                }
+            }
+        }
+    };
+
+    const moduleQueueGPT = {
+        name: '排隊Sakura',
+        type: 'onclick',
+        whitelist: '/wenku',
+        settings: [
+            newStringSetting('bind', 'none'),
+            newSelectSetting('模式', ['mode1', 'mode2', 'mode3'], 'mode1')
+        ],
+        run: async function (configObj) {
+            const allButtons = document.querySelectorAll('button');
+            for (const btn of allButtons) {
+                if (btn.textContent.includes('排队Sakura')) {
+                    btn.click();
+                }
+            }
+        }
+    };
+
+    const moduleKeepExample = {
+        name: 'Keep Example',
+        type: 'keep',
+        whitelist: '/workspace/sakura',
+        settings: [
+            newStringSetting('bind', 'none'),
+            newSelectSetting('模式', ['mode1', 'mode2', 'mode3'], 'mode1')
+        ],
+        _keepIntervalId: null,
+        _keepActive: false,
+        run: function (configObj) { }
+    };
+
     const defaultModules = [
-        moduleAddTranslator,
+        moduleAddSakuraTranslator,
+        moduleAddGPTTranslator,
         moduleDeleteTranslator,
-        moduleLaunchTranslator
+        moduleLaunchTranslator,
+        moduleQueueSakura,
+        moduleKeepExample
     ];
 
     function loadConfiguration() {
-        let storedConfig;
+        let tempStorage;
         try {
-            storedConfig = JSON.parse(localStorage.getItem(CONFIG_STORAGE_KEY));
-        } catch (e) {}
-        if (!storedConfig || storedConfig.version !== CONFIG_VERSION) {
+            tempStorage = JSON.parse(localStorage.getItem(CONFIG_STORAGE_KEY));
+        } catch (e) { }
+        if (!tempStorage || tempStorage.version !== CONFIG_VERSION) {
             return { version: CONFIG_VERSION, modules: JSON.parse(JSON.stringify(defaultModules)) };
         }
-        return storedConfig;
+        return tempStorage;
     }
-    function saveConfiguration(configObj) {
-        localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(configObj));
+    function saveConfiguration(obj) {
+        localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(obj));
     }
 
     let configuration = loadConfiguration();
@@ -259,200 +410,269 @@
         configuration = { version: CONFIG_VERSION, modules: JSON.parse(JSON.stringify(defaultModules)) };
         saveConfiguration(configuration);
     } else {
-        const defaultNames = defaultModules.map(mod => mod.name).sort().join(',');
-        const storedNames = configuration.modules.map(mod => mod.name).sort().join(',');
-        if (defaultNames !== storedNames) {
+        const defaultModuleNames = defaultModules.map(x => x.name).sort().join(',');
+        const storedModuleNames = configuration.modules.map(x => x.name).sort().join(',');
+        if (defaultModuleNames !== storedModuleNames) {
             configuration = { version: CONFIG_VERSION, modules: JSON.parse(JSON.stringify(defaultModules)) };
             saveConfiguration(configuration);
         }
     }
-
-    configuration.modules.forEach(moduleConfig => {
-        const defaultModule = defaultModules.find(dm => dm.name === moduleConfig.name);
-        if (defaultModule && typeof defaultModule.run === 'function') {
-            moduleConfig.run = async ref => { await defaultModule.run(ref); };
+    configuration.modules.forEach(moduleObj => {
+        const foundDefaultModule = defaultModules.find(x => x.name === moduleObj.name);
+        if (foundDefaultModule && typeof foundDefaultModule.run === 'function') {
+            for (const prop in foundDefaultModule) {
+                if (!moduleObj.hasOwnProperty(prop)) {
+                    moduleObj[prop] = foundDefaultModule[prop];
+                }
+            }
+            moduleObj.run = foundDefaultModule.run;
         }
     });
 
-    const activeModules = configuration.modules;
-    document.addEventListener('keydown', event => {
-        if (event.ctrlKey || event.altKey || event.metaKey) return;
-        const pressedKey = event.key.toLowerCase();
-        for (let i = 0; i < activeModules.length; i++) {
-            const moduleItem = activeModules[i];
-            const keyBinding = getModuleSetting(moduleItem, 'bind');
-            if (keyBinding && keyBinding !== 'none' && keyBinding.toLowerCase() === pressedKey) {
-                event.preventDefault();
-                if (typeof moduleItem.run === 'function') moduleItem.run(moduleItem);
+    const keepIntervals = new Map();
+    const keepActiveSet = new Set();
+    function startKeepModule(modItem, modHeader) {
+        if (keepIntervals.has(modItem.name)) return;
+        modHeader.classList.add('active');
+        keepActiveSet.add(modItem.name);
+        const intervalId = setInterval(() => {
+            if (typeof modItem.run === 'function') {
+                modItem.run(modItem);
+                console.log('[Keep Module] ' + modItem.name + ' is running...');
+            }
+        }, 2000);
+        keepIntervals.set(modItem.name, intervalId);
+    }
+    function stopKeepModule(modItem, modHeader) {
+        const intervalId = keepIntervals.get(modItem.name);
+        if (intervalId) {
+            clearInterval(intervalId);
+            keepIntervals.delete(modItem.name);
+        }
+        modHeader.classList.remove('active');
+        keepActiveSet.delete(modItem.name);
+    }
+
+    document.addEventListener('keydown', keyEvent => {
+        if (keyEvent.ctrlKey || keyEvent.altKey || keyEvent.metaKey) return;
+        const pressedKey = keyEvent.key.toLowerCase();
+        for (const modItem of configuration.modules) {
+            const bindVal = getModuleSetting(modItem, 'bind');
+            if (!bindVal || bindVal === 'none') continue;
+            if (bindVal.toLowerCase() === pressedKey) {
+                if (!isModuleEnabledByWhitelist(modItem)) continue;
+                keyEvent.preventDefault();
+                handleModuleClick(modItem, null);
             }
         }
     });
 
     const panel = document.createElement('div');
     panel.id = 'ntr-panel';
-
-    // New Feature: Restore saved panel position
     const savedPosition = localStorage.getItem('ntr-panel-position');
     if (savedPosition) {
         try {
-            const pos = JSON.parse(savedPosition);
-            if (pos.left && pos.top) {
-                panel.style.left = pos.left;
-                panel.style.top = pos.top;
+            const parsedPosition = JSON.parse(savedPosition);
+            if (parsedPosition.left && parsedPosition.top) {
+                panel.style.left = parsedPosition.left;
+                panel.style.top = parsedPosition.top;
             }
-        } catch(e) {}
+        } catch (e) { }
     }
-
     let dragging = false, dragOffsetX = 0, dragOffsetY = 0;
-    function handleMouseDown(e) {
+    function mouseDownHandler(e) {
         dragging = true;
         dragOffsetX = e.clientX - panel.offsetLeft;
         dragOffsetY = e.clientY - panel.offsetTop;
         e.preventDefault();
     }
-    function handleMouseMove(e) {
+    function mouseMoveHandler(e) {
         if (!dragging) return;
         panel.style.left = (e.clientX - dragOffsetX) + 'px';
         panel.style.top = (e.clientY - dragOffsetY) + 'px';
     }
-    function handleMouseUp() { dragging = false; }
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+    function mouseUpHandler() {
+        dragging = false;
+        localStorage.setItem('ntr-panel-position', JSON.stringify({
+            left: panel.style.left,
+            top: panel.style.top
+        }));
+    }
+    document.addEventListener('mousemove', mouseMoveHandler);
+    document.addEventListener('mouseup', mouseUpHandler);
 
-    const titleBarDiv = document.createElement('div');
-    titleBarDiv.className = 'ntr-titlebar';
-    titleBarDiv.textContent = 'NTR ToolBox';
-    titleBarDiv.addEventListener('mousedown', handleMouseDown);
-    panel.appendChild(titleBarDiv);
+    const titleBar = document.createElement('div');
+    titleBar.className = 'ntr-titlebar';
+    titleBar.textContent = 'NTR ToolBox';
+    titleBar.addEventListener('mousedown', mouseDownHandler);
+    panel.appendChild(titleBar);
 
     const panelBody = document.createElement('div');
     panelBody.className = 'ntr-panel-body';
     panel.appendChild(panelBody);
 
-    activeModules.forEach(moduleItem => {
+    function isModuleEnabledByWhitelist(modItem) {
+        if (!modItem.whitelist || modItem.whitelist.trim() === '') return domainAllowed;
+        const parts = modItem.whitelist.split(',').map(s => s.trim()).filter(Boolean);
+        return domainAllowed && parts.some(p => location.pathname.includes(p));
+    }
+    function handleModuleClick(modItem, modHeader) {
+        if (!domainAllowed || !isModuleEnabledByWhitelist(modItem)) return;
+        if (modItem.type === 'onclick') {
+            if (typeof modItem.run === 'function') {
+                modItem.run(modItem);
+            }
+        } else if (modItem.type === 'keep') {
+            const isActive = keepActiveSet.has(modItem.name);
+            if (isActive) {
+                if (modHeader) stopKeepModule(modItem, modHeader);
+            } else {
+                if (modHeader) startKeepModule(modItem, modHeader);
+            }
+        }
+    }
+
+    const headerMap = new Map();
+    configuration.modules.forEach(modItem => {
+
         const moduleContainer = document.createElement('div');
         moduleContainer.className = 'ntr-module-container';
-
         const moduleHeader = document.createElement('div');
         moduleHeader.className = 'ntr-module-header';
-        if (!domainAllowed) {
-            moduleHeader.style.opacity = '0.6';
-            moduleHeader.style.cursor = 'default';
-        }
         const nameSpan = document.createElement('span');
-        nameSpan.textContent = moduleItem.name;
+        nameSpan.textContent = modItem.name;
         moduleHeader.appendChild(nameSpan);
-
-        const launchIcon = document.createElement('span');
-        launchIcon.textContent = '▶';
-        launchIcon.style.marginLeft = '8px';
-        moduleHeader.appendChild(launchIcon);
-
-        const moduleSettingsContainer = document.createElement('div');
-        moduleSettingsContainer.className = 'ntr-settings-container';
-        moduleSettingsContainer.style.display = 'none';
-
+        const iconSpan = document.createElement('span');
+        iconSpan.textContent = modItem.type === 'keep' ? '⇋' : '▶';
+        iconSpan.style.marginLeft = '8px';
+        moduleHeader.appendChild(iconSpan);
+        const settingsContainer = document.createElement('div');
+        settingsContainer.className = 'ntr-settings-container';
+        settingsContainer.style.display = 'none';
         moduleHeader.oncontextmenu = function (e) {
             e.preventDefault();
-            const currentDisplay = moduleSettingsContainer.style.display || window.getComputedStyle(moduleSettingsContainer).display;
-            moduleSettingsContainer.style.display = currentDisplay === 'none' ? 'block' : 'none';
+            const currentDisplay = settingsContainer.style.display || window.getComputedStyle(settingsContainer).display;
+            settingsContainer.style.display = currentDisplay === 'none' ? 'block' : 'none';
         };
         moduleHeader.onclick = function (e) {
-            if (e.button === 0 && !e.ctrlKey && !e.altKey && !e.shiftKey && domainAllowed) {
+            if (e.button === 0 && !e.ctrlKey && !e.altKey && !e.shiftKey) {
                 if (e.target.classList.contains('ntr-bind-button')) return;
-                if (typeof moduleItem.run === 'function') moduleItem.run(moduleItem);
+                handleModuleClick(modItem, moduleHeader);
             }
         };
-
-        if (Array.isArray(moduleItem.settings)) {
-            moduleItem.settings.forEach(setting => {
-                const settingRow = document.createElement('div');
-                settingRow.style.marginBottom = '8px';
-
+        if (modItem.type === 'keep' && keepActiveSet.has(modItem.name)) {
+            moduleHeader.classList.add('active');
+        }
+        if (Array.isArray(modItem.settings)) {
+            modItem.settings.forEach(setObj => {
+                const row = document.createElement('div');
+                row.style.marginBottom = '8px';
                 const label = document.createElement('label');
                 label.style.display = 'inline-block';
                 label.style.minWidth = '70px';
                 label.style.color = '#ccc';
-                label.textContent = setting.name + ': ';
-                settingRow.appendChild(label);
-
+                label.textContent = setObj.name + ': ';
+                row.appendChild(label);
                 let inputElement;
-                if (setting.type === 'boolean') {
+                if (setObj.type === 'boolean') {
                     inputElement = document.createElement('input');
                     inputElement.type = 'checkbox';
-                    inputElement.checked = Boolean(setting.value);
+                    inputElement.checked = Boolean(setObj.value);
                     inputElement.onchange = function () {
-                        setting.value = inputElement.checked;
+                        setObj.value = inputElement.checked;
                         saveConfiguration(configuration);
                     };
-                } else if (setting.type === 'number') {
+                } else if (setObj.type === 'number') {
                     inputElement = document.createElement('input');
                     inputElement.type = 'number';
-                    inputElement.value = setting.value;
+                    inputElement.value = setObj.value;
                     inputElement.className = 'ntr-number-input';
                     inputElement.onchange = function () {
-                        setting.value = Number(inputElement.value) || 0;
+                        setObj.value = Number(inputElement.value) || 0;
                         saveConfiguration(configuration);
                     };
-                } else if (setting.type === 'string' && setting.name === 'bind') {
+                } else if (setObj.type === 'string' && setObj.name === 'bind') {
                     inputElement = document.createElement('button');
                     inputElement.className = 'ntr-bind-button';
-                    inputElement.textContent = (setting.value === 'none') ? '(None)' : '[' + setting.value.toUpperCase() + ']';
+                    inputElement.textContent = setObj.value === 'none' ? '(None)' : '[' + setObj.value.toUpperCase() + ']';
                     inputElement.onclick = function () {
                         inputElement.textContent = '(Press any key)';
-                        function handleKey(ev) {
-                            ev.preventDefault();
-                            if (ev.key === 'Escape') {
-                                setting.value = 'none';
+                        function handleKey(keyEvent) {
+                            keyEvent.preventDefault();
+                            if (keyEvent.key === 'Escape') {
+                                setObj.value = 'none';
                                 inputElement.textContent = '(None)';
                                 saveConfiguration(configuration);
                                 document.removeEventListener('keydown', handleKey, true);
-                                ev.stopPropagation();
+                                keyEvent.stopPropagation();
                                 return;
                             }
-                            const keyChar = ev.key.toLowerCase();
-                            setting.value = keyChar;
-                            inputElement.textContent = '[' + keyChar.toUpperCase() + ']';
+                            const pressedKey = keyEvent.key.toLowerCase();
+                            setObj.value = pressedKey;
+                            inputElement.textContent = '[' + pressedKey.toUpperCase() + ']';
                             saveConfiguration(configuration);
                             document.removeEventListener('keydown', handleKey, true);
-                            ev.stopPropagation();
+                            keyEvent.stopPropagation();
                         }
                         document.addEventListener('keydown', handleKey, true);
                     };
-                } else if (setting.type === 'string') {
+                } else if (setObj.type === 'select' && Array.isArray(setObj.options)) {
+                    inputElement = document.createElement('select');
+                    setObj.options.forEach(opt => {
+                        const optionEl = document.createElement('option');
+                        optionEl.value = opt;
+                        optionEl.textContent = opt;
+                        if (opt === setObj.value) {
+                            optionEl.selected = true;
+                        }
+                        inputElement.appendChild(optionEl);
+                    });
+                    inputElement.onchange = function () {
+                        setObj.value = inputElement.value;
+                        saveConfiguration(configuration);
+                    };
+                } else if (setObj.type === 'string') {
                     inputElement = document.createElement('input');
                     inputElement.type = 'text';
-                    inputElement.value = setting.value;
+                    inputElement.value = setObj.value;
                     inputElement.className = 'ntr-input';
                     inputElement.onchange = function () {
-                        setting.value = inputElement.value;
+                        setObj.value = inputElement.value;
                         saveConfiguration(configuration);
                     };
                 } else {
                     inputElement = document.createElement('span');
                     inputElement.style.color = '#999';
-                    inputElement.textContent = String(setting.value);
+                    inputElement.textContent = String(setObj.value);
                 }
-                settingRow.appendChild(inputElement);
-                moduleSettingsContainer.appendChild(settingRow);
+                row.appendChild(inputElement);
+                settingsContainer.appendChild(row);
             });
         }
         moduleContainer.appendChild(moduleHeader);
-        moduleContainer.appendChild(moduleSettingsContainer);
+        moduleContainer.appendChild(settingsContainer);
         panelBody.appendChild(moduleContainer);
+        headerMap.set(modItem, moduleHeader);
     });
 
     const infoText = document.createElement('div');
     infoText.className = 'ntr-info';
-    infoText.textContent = '左鍵執行 | 右鍵設定';
+    infoText.textContent = '左鍵執行/切換 | 右鍵設定';
     panel.appendChild(infoText);
-
     document.body.appendChild(panel);
 
-    document.addEventListener('mouseup', function() {
-        localStorage.setItem('ntr-panel-position', JSON.stringify({
-            left: panel.style.left,
-            top: panel.style.top
-        }));
-    });
+    setInterval(() => {
+        configuration.modules.forEach(m => {
+            const moduleHeader = headerMap.get(m);
+            if (!moduleHeader) return;
+            const moduleContainer = moduleHeader.parentElement;
+            const allow = domainAllowed && isModuleEnabledByWhitelist(m);
+            if (!allow) {
+                moduleContainer.style.display = 'none';
+                if (m.type === 'keep' && keepActiveSet.has(m.name)) stopKeepModule(m, moduleHeader);
+            } else {
+                moduleContainer.style.display = 'block';
+            }
+        });
+    }, 1000);
 })();
