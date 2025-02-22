@@ -1,13 +1,15 @@
 // ==UserScript==
 // @name         NTR ToolBox
 // @namespace    http://tampermonkey.net/
-// @version      v0.1-20250222
+// @version      v0.2.2-20250223
 // @author       TheNano(百合仙人)
 // @description  ToolBox for Novel Translate bot website
 // @match        https://books.fishhawk.top/*
 // @match        https://books1.fishhawk.top/*
 // @grant        none
 // @icon         https://raw.githubusercontent.com/LittleSurvival/NTRTools/refs/heads/main/icon.jpg
+// @license      All Rights Reserved
+// 
 // ==/UserScript==
 
 (async function () {
@@ -121,7 +123,7 @@
         return found ? found.value : undefined;
     }
 
-    const CONFIG_VERSION = 4;
+    const CONFIG_VERSION = 7;
     const CONFIG_STORAGE_KEY = 'NTR_ToolBox_Config';
     const domainAllowed = ['books.fishhawk.top', 'books1.fishhawk.top'].includes(location.hostname);
 
@@ -131,15 +133,16 @@
         whitelist: '/workspace/sakura',
         settings: [
             newNumberSetting('數量', 5),
+            newNumberSetting('延遲', 5),
             newStringSetting('名稱', 'NTR translator '),
             newStringSetting('鏈接', 'https://127.0.0.1:8080'),
             newStringSetting('bind', 'none'),
-            newSelectSetting('模式', ['mode1', 'mode2', 'mode3'], 'mode1')
         ],
         run: async function (configObj) {
             const totalCount = getModuleSetting(configObj, '數量') || 1;
             const namePrefix = getModuleSetting(configObj, '名稱') || '';
             const linkValue = getModuleSetting(configObj, '鏈接') || '';
+            const delayValue = getModuleSetting(configObj, '延遲') || 5;
             const delay = ms => new Promise(r => setTimeout(r, ms));
             let currentIndex = 1;
             async function closeTab() {
@@ -176,7 +179,7 @@
                     addBtn.click();
                     currentIndex++;
                     if (currentIndex <= totalCount) {
-                        await delay(100);
+                        await delay(delayValue);
                         await fillForm();
                     }
                 }
@@ -195,12 +198,12 @@
         whitelist: '/workspace/gpt',
         settings: [
             newNumberSetting('數量', 5),
+            newNumberSetting('延遲', 5),
             newStringSetting('名稱', 'NTR translator '),
             newStringSetting('模型', 'deepseek-chat'),
             newStringSetting('鏈接', 'https://api.deepseek.com'),
             newStringSetting('Key', 'sk-wait-for-input'),
             newStringSetting('bind', 'none'),
-            newSelectSetting('模式', ['mode1', 'mode2', 'mode3'], 'mode1')
         ],
         run: async function (configObj) {
             const countVal = getModuleSetting(configObj, '數量') || 1;
@@ -208,6 +211,7 @@
             const modelVal = getModuleSetting(configObj, '模型') || '';
             const apiKeyVal = getModuleSetting(configObj, 'Key') || '';
             const apiUrlVal = getModuleSetting(configObj, '鏈接') || '';
+            const delayValue = getModuleSetting(configObj, '延遲') || 5;
             const delay = ms => new Promise(r => setTimeout(r, ms));
             let currentIndex = 1;
             async function closeTab() {
@@ -246,7 +250,7 @@
                     confirmBtn.click();
                     currentIndex++;
                     if (currentIndex <= countVal) {
-                        await delay(200);
+                        await delay(delayValue);
                         await fillForm();
                     }
                 }
@@ -266,7 +270,6 @@
         settings: [
             newStringSetting('排除', '共享,本机,AutoDL'),
             newStringSetting('bind', 'none'),
-            newSelectSetting('模式', ['mode1', 'mode2', 'mode3'], 'mode1')
         ],
         run: async function (configObj) {
             const excludeStr = getModuleSetting(configObj, '排除') || '';
@@ -296,7 +299,6 @@
         settings: [
             newNumberSetting('延遲間隔', 50),
             newStringSetting('bind', 'none'),
-            newSelectSetting('模式', ['mode1', 'mode2', 'mode3'], 'mode1')
         ],
         run: async function (configObj) {
             const intervalVal = getModuleSetting(configObj, '延遲間隔') || 50;
@@ -352,34 +354,94 @@
     };
 
     const moduleQueueGPT = {
-        name: '排隊Sakura',
+        name: '排隊GPT',
         type: 'onclick',
         whitelist: '/wenku',
         settings: [
+            newSelectSetting('模式', ['常規', '過期', '重翻'], '常規'),
             newStringSetting('bind', 'none'),
-            newSelectSetting('模式', ['mode1', 'mode2', 'mode3'], 'mode1')
         ],
         run: async function (configObj) {
+            const mode = getModuleSetting(configObj, '模式');
+            const delay = ms => new Promise(r => setTimeout(r, ms));
+            const modeMap = {
+                '常規': '常规',
+                '過期': '过期',
+                '重翻': '重翻'
+            };
+            const cnMode = modeMap[mode];
+            const tags = document.querySelectorAll('.n-tag__content');
+            for (const tag of tags) {
+                if (tag.textContent === cnMode) {
+                    tag.click();
+                    break;
+                }
+            }
             const allButtons = document.querySelectorAll('button');
             for (const btn of allButtons) {
-                if (btn.textContent.includes('排队Sakura')) {
+                if (btn.textContent.includes('排队GPT')) {
                     btn.click();
+                    await delay(10);
                 }
             }
         }
     };
 
     const moduleKeepExample = {
-        name: 'Keep Example',
+        name: '自動重試',
         type: 'keep',
-        whitelist: '/workspace/sakura',
+        whitelist: '/workspace/*',
         settings: [
+            newNumberSetting('最大重試次數', 3),
             newStringSetting('bind', 'none'),
-            newSelectSetting('模式', ['mode1', 'mode2', 'mode3'], 'mode1')
         ],
         _keepIntervalId: null,
         _keepActive: false,
-        run: function (configObj) { }
+        _attempts: 0,
+        run: function (configObj) {
+            if (!this._keepActive) {
+                this._keepActive = true;
+                const maxAttempts = getModuleSetting(configObj, '最大重試次數');
+                document.addEventListener('click', (e) => {
+                    if (e.target.tagName === 'BUTTON') {
+                        this._attempts = 0;
+                    }
+                });
+
+                this._keepIntervalId = setInterval(() => {
+                    const listItems = document.querySelectorAll('.n-list-item');
+                    const unfinishedItems = Array.from(listItems).filter(item => {
+                        const descriptionText = item.querySelector('.n-thing-main__description');
+                        return descriptionText && descriptionText.textContent.includes('未完成');
+                    });
+
+                    if (unfinishedItems.length > 0 && this._attempts < maxAttempts) {
+                        const hasStopButton = Array.from(document.querySelectorAll('button')).some(btn => 
+                            btn.textContent === '停止'
+                        );
+
+                        if (!hasStopButton) {
+                            const retryButtons = Array.from(document.querySelectorAll('button')).filter(btn => 
+                                btn.textContent.includes('重试未完成任务')
+                            );
+                            const clickCount = Math.min(unfinishedItems.length, listItems.length);
+                            if (retryButtons[0]) {
+                                for (let i = 0; i < clickCount; i++) {
+                                    retryButtons[0].click();
+                                }
+                                this._attempts++;
+                            }
+                        }
+                    }
+                }, 1000);
+            } else {
+                this._keepActive = false;
+                if (this._keepIntervalId) {
+                    clearInterval(this._keepIntervalId);
+                    this._keepIntervalId = null;
+                }
+            }
+        }
     };
 
     const defaultModules = [
@@ -388,6 +450,7 @@
         moduleDeleteTranslator,
         moduleLaunchTranslator,
         moduleQueueSakura,
+        moduleQueueGPT,
         moduleKeepExample
     ];
 
@@ -514,7 +577,13 @@
     function isModuleEnabledByWhitelist(modItem) {
         if (!modItem.whitelist || modItem.whitelist.trim() === '') return domainAllowed;
         const parts = modItem.whitelist.split(',').map(s => s.trim()).filter(Boolean);
-        return domainAllowed && parts.some(p => location.pathname.includes(p));
+        return domainAllowed && parts.some(p => {
+            if (p.endsWith('/*')) {
+                const basePath = p.slice(0, -2);
+                return location.pathname.startsWith(basePath + '/');
+            }
+            return location.pathname.includes(p);
+        });
     }
     function handleModuleClick(modItem, modHeader) {
         if (!domainAllowed || !isModuleEnabledByWhitelist(modItem)) return;
