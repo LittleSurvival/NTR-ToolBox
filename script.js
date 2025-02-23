@@ -124,7 +124,7 @@
         return found ? found.value : undefined;
     }
 
-    const CONFIG_VERSION = 11;
+    const CONFIG_VERSION = 12;
     const CONFIG_STORAGE_KEY = 'NTR_ToolBox_Config';
     const domainAllowed = ['books.fishhawk.top', 'books1.fishhawk.top'].includes(location.hostname);
 
@@ -299,19 +299,23 @@
         whitelist: '/workspace',
         settings: [
             newNumberSetting('延遲間隔', 50),
+            newNumberSetting('最多啟動', 999),
             newStringSetting('bind', 'none'),
         ],
         run: async function (configObj) {
-            const intervalVal = getModuleSetting(configObj, '延遲間隔') || 50;
             const allBtns = document.querySelectorAll('button');
+            const intervalVal = getModuleSetting(configObj, '延遲間隔') || 50;
+            const maxClick = Math.min(getModuleSetting(configObj, '最多啟動') || 999, allBtns.length);
             const delay = ms => new Promise(r => setTimeout(r, ms));
             let idx = 0;
+            let clickCount = 0;
             async function nextClick() {
-                while (idx < allBtns.length) {
+                while (idx < allBtns.length && clickCount < maxClick) {
                     const btn = allBtns[idx];
                     idx++;
                     if (btn.textContent.indexOf('启动') !== -1 || btn.textContent.indexOf('啟動') !== -1) {
                         btn.click();
+                        clickCount++;
                         await delay(intervalVal);
                     }
                 }
@@ -526,7 +530,7 @@
                 this._keepActive = true;
                 const maxAttempts = getModuleSetting(configObj, '最大重試次數');
                 document.addEventListener('click', (e) => {
-                    if (e.target.tagName === 'BUTTON') {
+                    if (e.target.tagName === 'button') {
                         this._attempts = 0;
                     }
                 });
@@ -572,7 +576,7 @@
         type: 'keep',
         whitelist: '',
         settings: [
-            newNumberSetting('同步間隔', 100)
+            newNumberSetting('同步間隔', 1000),
         ],
         run: async function(configObj) {
             const interval = getModuleSetting(configObj, '同步間隔') || 1000;
@@ -698,7 +702,6 @@
         const intervalId = setInterval(() => {
             if (typeof modItem.run === 'function') {
                 modItem.run(modItem);
-                console.log('[Keep Module] ' + modItem.name + ' is running...');
             }
         }, 2000);
         keepIntervals.set(modItem.name, intervalId);
@@ -729,8 +732,11 @@
         }
     });
 
+    // Panel elements
     const panel = document.createElement('div');
     panel.id = 'ntr-panel';
+
+    // Restore saved position
     const savedPosition = localStorage.getItem('ntr-panel-position');
     if (savedPosition) {
         try {
@@ -741,8 +747,37 @@
             }
         } catch (e) { }
     }
+
+    // Minimization state
+    let isMinimized = false;
+
+    // Toggle icon on the title bar's right side
+    const toggleSpan = document.createElement('span');
+    toggleSpan.style.float = 'right';
+    toggleSpan.textContent = '[-]'; // default (expanded)
+
+    function setMinimizedState(newVal) {
+        isMinimized = newVal;
+        if (isMinimized) {
+            panelBody.style.display = 'none';
+            toggleSpan.textContent = '[+]';
+        } else {
+            panelBody.style.display = 'block';
+            toggleSpan.textContent = '[-]';
+        }
+    }
+
+    // Title bar
+    const titleBar = document.createElement('div');
+    titleBar.className = 'ntr-titlebar';
+    titleBar.innerHTML = 'NTR ToolBox v0.3.1';
+    titleBar.appendChild(toggleSpan);
+
+    // Make the panel draggable by the title bar
     let dragging = false, dragOffsetX = 0, dragOffsetY = 0;
     function mouseDownHandler(e) {
+        // Only start dragging on left mouse button
+        if (e.button !== 0) return;
         dragging = true;
         dragOffsetX = e.clientX - panel.offsetLeft;
         dragOffsetY = e.clientY - panel.offsetTop;
@@ -750,29 +785,65 @@
     }
     function mouseMoveHandler(e) {
         if (!dragging) return;
-        panel.style.left = (e.clientX - dragOffsetX) + 'px';
-        panel.style.top = (e.clientY - dragOffsetY) + 'px';
+        // Move the panel
+        const newLeft = e.clientX - dragOffsetX;
+        const newTop = e.clientY - dragOffsetY;
+        panel.style.left = newLeft + 'px';
+        panel.style.top = newTop + 'px';
+        // Keep the panel fully in the window
+        clampPanelPosition();
     }
     function mouseUpHandler() {
+        if (!dragging) return;
         dragging = false;
-        localStorage.setItem('NTR-Panel-Position', JSON.stringify({
+        // Save position
+        localStorage.setItem('ntr-panel-position', JSON.stringify({
             left: panel.style.left,
             top: panel.style.top
         }));
     }
+    function clampPanelPosition() {
+        const rect = panel.getBoundingClientRect();
+        let left = parseFloat(panel.style.left) || 0;
+        let top = parseFloat(panel.style.top) || 0;
+        const maxLeft = window.innerWidth - rect.width;
+        const maxTop = window.innerHeight - rect.height;
+        if (left < 0) left = 0;
+        if (top < 0) top = 0;
+        if (left > maxLeft) left = maxLeft;
+        if (top > maxTop) top = maxTop;
+        panel.style.left = left + 'px';
+        panel.style.top = top + 'px';
+    }
+
+    titleBar.addEventListener('mousedown', mouseDownHandler);
     document.addEventListener('mousemove', mouseMoveHandler);
     document.addEventListener('mouseup', mouseUpHandler);
 
-    const titleBar = document.createElement('div');
-    titleBar.className = 'ntr-titlebar';
-    titleBar.innerHTML = 'NTR ToolBox v0.3.1';
-    titleBar.addEventListener('mousedown', mouseDownHandler);
+    // Right-click (desktop) or single-tap (mobile) => toggle shrink/expand
+    if (isMobile) {
+        titleBar.addEventListener('click', (e) => {
+            // Prevent interfering with drag
+            if (!dragging) {
+                e.preventDefault();
+                setMinimizedState(!isMinimized);
+            }
+        });
+    } else {
+        titleBar.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            setMinimizedState(!isMinimized);
+        });
+    }
+
     panel.appendChild(titleBar);
 
+    // Panel body
     const panelBody = document.createElement('div');
     panelBody.className = 'ntr-panel-body';
     panel.appendChild(panelBody);
 
+    // Utility: check if module is enabled by its whitelist
     function isModuleEnabledByWhitelist(modItem) {
         if (!modItem.whitelist || modItem.whitelist.trim() === '') return domainAllowed;
         const parts = modItem.whitelist.split(',').map(s => s.trim()).filter(Boolean);
@@ -784,6 +855,8 @@
             return location.pathname.includes(p);
         });
     }
+
+    // Handle module click (run or keep)
     function handleModuleClick(modItem, modHeader) {
         if (!domainAllowed || !isModuleEnabledByWhitelist(modItem)) return;
         if (modItem.type === 'onclick') {
@@ -800,6 +873,7 @@
         }
     }
 
+    // Create the module UI
     const headerMap = new Map();
     configuration.modules.forEach(modItem => {
         const moduleContainer = document.createElement('div');
@@ -812,28 +886,36 @@
         nameSpan.textContent = modItem.name;
         moduleHeader.appendChild(nameSpan);
 
-        const iconSpan = document.createElement('span');
-        iconSpan.textContent = modItem.type === 'keep' ? '⇋' : '▶';
-        iconSpan.style.marginLeft = '8px';
+        if (!isMobile) {
+            const iconSpan = document.createElement('span');
+            iconSpan.textContent = modItem.type === 'keep' ? '⇋' : '▶';
+            iconSpan.style.marginLeft = '8px';
+            moduleHeader.appendChild(iconSpan);
+        }
 
-        moduleHeader.appendChild(iconSpan);
         const settingsContainer = document.createElement('div');
         settingsContainer.className = 'ntr-settings-container';
         settingsContainer.style.display = 'none';
 
         if (isMobile) {
-            // On mobile: single tap to run module, double tap to toggle settings.
-            moduleHeader.ondblclick = function (e) {
-                e.preventDefault();
+            // On mobile: single tap to run module, separate button to toggle settings
+            const settingsButton = document.createElement('button');
+            settingsButton.textContent = '⚙️';
+            settingsButton.style.color = 'white';
+            settingsButton.style.float = 'right';
+            settingsButton.onclick = function (e) {
+                e.stopPropagation();
                 const currentDisplay = settingsContainer.style.display || window.getComputedStyle(settingsContainer).display;
                 settingsContainer.style.display = currentDisplay === 'none' ? 'block' : 'none';
             };
+            moduleHeader.appendChild(settingsButton);
+
             moduleHeader.onclick = function (e) {
-                if (e.target.classList.contains('ntr-bind-button')) return;
+                if (e.target.classList.contains('ntr-bind-button') || e.target === settingsButton) return;
                 handleModuleClick(modItem, moduleHeader);
             };
         } else {
-            // Desktop: left-click to run module, right-click to toggle settings.
+            // Desktop: left-click => run module or toggle keep, right-click => open settings
             moduleHeader.oncontextmenu = function (e) {
                 e.preventDefault();
                 const currentDisplay = settingsContainer.style.display || window.getComputedStyle(settingsContainer).display;
@@ -944,14 +1026,7 @@
         headerMap.set(modItem, moduleHeader);
     });
 
-    //load keep module state from storage and auto-start
-    function updateKeepStateStorage() {
-        const state = {};
-        keepActiveSet.forEach(moduleName => {
-            state[moduleName] = true;
-        });
-        localStorage.setItem('NTR_KeepState', JSON.stringify(state));
-    }
+    // load keep module state from storage and auto-start
     function loadKeepStateStorage() {
         try {
             return JSON.parse(localStorage.getItem('NTR_KeepState') || '{}');
@@ -969,19 +1044,21 @@
         }
     });
 
-    //Create info bar with left/right aligned texts
+    // Create info bar with left/right aligned texts
     const infoText = document.createElement('div');
     infoText.className = 'ntr-info';
     const leftInfo = document.createElement('span');
-    leftInfo.textContent = isMobile ? '單擊執行 | 雙擊設定' : '左鍵執行/切換 | 右鍵設定';
+    leftInfo.textContent = isMobile ? '單擊執行 | ⚙️設定' : '左鍵執行/切換 | 右鍵設定';
     const rightInfo = document.createElement('span');
     rightInfo.textContent = 'Author: TheNano(百合仙人)';
     infoText.appendChild(leftInfo);
     infoText.appendChild(rightInfo);
     panel.appendChild(infoText);
+
     document.body.appendChild(panel);
 
-    const updateModuleVisibility = () => {
+    // Keep modules hidden if domain not allowed or if whitelist fails
+    function updateModuleVisibility() {
         configuration.modules.forEach(m => {
             const moduleHeader = headerMap.get(m);
             if (!moduleHeader) return;
@@ -994,7 +1071,7 @@
                 moduleContainer.style.display = 'block';
             }
         });
-    };
+    }
     updateModuleVisibility();
-    setInterval(updateModuleVisibility, 250);
+    setInterval(updateModuleVisibility, 500);
 })();
