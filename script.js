@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NTR ToolBox
 // @namespace    http://tampermonkey.net/
-// @version      v0.3-20250223
+// @version      v0.3.1-20250223
 // @author       TheNano(百合仙人)
 // @description  ToolBox for Novel Translate bot website
 // @match        https://books.fishhawk.top/*
@@ -9,12 +9,12 @@
 // @grant        GM_openInTab
 // @icon         https://raw.githubusercontent.com/LittleSurvival/NTRTools/refs/heads/main/icon.jpg
 // @license      All Rights Reserved
-// 
 // ==/UserScript==
 
 (async function () {
     'use strict';
 
+    const isMobile = /Mobi|Android/i.test(navigator.userAgent);
     const style = document.createElement('style');
     style.textContent = `
     #ntr-panel {
@@ -93,7 +93,8 @@
         cursor: pointer;
     }
     .ntr-info {
-        text-align: center;
+        display: flex;
+        justify-content: space-between;
         font-size: 10px;
         color: #888;
         margin-top: 8px;
@@ -764,7 +765,7 @@
 
     const titleBar = document.createElement('div');
     titleBar.className = 'ntr-titlebar';
-    titleBar.textContent = 'NTR ToolBox';
+    titleBar.innerHTML = 'NTR ToolBox v0.3.1';
     titleBar.addEventListener('mousedown', mouseDownHandler);
     panel.appendChild(titleBar);
 
@@ -803,30 +804,49 @@
     configuration.modules.forEach(modItem => {
         const moduleContainer = document.createElement('div');
         moduleContainer.className = 'ntr-module-container';
+
         const moduleHeader = document.createElement('div');
         moduleHeader.className = 'ntr-module-header';
+
         const nameSpan = document.createElement('span');
         nameSpan.textContent = modItem.name;
         moduleHeader.appendChild(nameSpan);
+
         const iconSpan = document.createElement('span');
         iconSpan.textContent = modItem.type === 'keep' ? '⇋' : '▶';
         iconSpan.style.marginLeft = '8px';
+
         moduleHeader.appendChild(iconSpan);
         const settingsContainer = document.createElement('div');
         settingsContainer.className = 'ntr-settings-container';
         settingsContainer.style.display = 'none';
 
-        moduleHeader.oncontextmenu = function (e) {
-            e.preventDefault();
-            const currentDisplay = settingsContainer.style.display || window.getComputedStyle(settingsContainer).display;
-            settingsContainer.style.display = currentDisplay === 'none' ? 'block' : 'none';
-        };
-        moduleHeader.onclick = function (e) {
-            if (e.button === 0 && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        if (isMobile) {
+            // On mobile: single tap to run module, double tap to toggle settings.
+            moduleHeader.ondblclick = function (e) {
+                e.preventDefault();
+                const currentDisplay = settingsContainer.style.display || window.getComputedStyle(settingsContainer).display;
+                settingsContainer.style.display = currentDisplay === 'none' ? 'block' : 'none';
+            };
+            moduleHeader.onclick = function (e) {
                 if (e.target.classList.contains('ntr-bind-button')) return;
                 handleModuleClick(modItem, moduleHeader);
-            }
-        };
+            };
+        } else {
+            // Desktop: left-click to run module, right-click to toggle settings.
+            moduleHeader.oncontextmenu = function (e) {
+                e.preventDefault();
+                const currentDisplay = settingsContainer.style.display || window.getComputedStyle(settingsContainer).display;
+                settingsContainer.style.display = currentDisplay === 'none' ? 'block' : 'none';
+            };
+            moduleHeader.onclick = function (e) {
+                if (e.button === 0 && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+                    if (e.target.classList.contains('ntr-bind-button')) return;
+                    handleModuleClick(modItem, moduleHeader);
+                }
+            };
+        }
+
         if (modItem.type === 'keep' && keepActiveSet.has(modItem.name)) {
             moduleHeader.classList.add('active');
         }
@@ -834,12 +854,14 @@
             modItem.settings.forEach(setObj => {
                 const row = document.createElement('div');
                 row.style.marginBottom = '8px';
+
                 const label = document.createElement('label');
                 label.style.display = 'inline-block';
                 label.style.minWidth = '70px';
                 label.style.color = '#ccc';
                 label.textContent = setObj.name + ': ';
                 row.appendChild(label);
+
                 let inputElement;
                 if (setObj.type === 'boolean') {
                     inputElement = document.createElement('input');
@@ -922,7 +944,7 @@
         headerMap.set(modItem, moduleHeader);
     });
 
-    // New: load keep module state from storage and auto-start
+    //load keep module state from storage and auto-start
     function updateKeepStateStorage() {
         const state = {};
         keepActiveSet.forEach(moduleName => {
@@ -947,9 +969,15 @@
         }
     });
 
+    //Create info bar with left/right aligned texts
     const infoText = document.createElement('div');
     infoText.className = 'ntr-info';
-    infoText.textContent = '左鍵執行/切換 | 右鍵設定';
+    const leftInfo = document.createElement('span');
+    leftInfo.textContent = isMobile ? '單擊執行 | 雙擊設定' : '左鍵執行/切換 | 右鍵設定';
+    const rightInfo = document.createElement('span');
+    rightInfo.textContent = 'Author: TheNano(百合仙人)';
+    infoText.appendChild(leftInfo);
+    infoText.appendChild(rightInfo);
     panel.appendChild(infoText);
     document.body.appendChild(panel);
 
