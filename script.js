@@ -1,8 +1,7 @@
 // ==UserScript==
 // @name         NTR ToolBox
 // @namespace    http://tampermonkey.net/
-// @version      v0.3.1-20250223
-// @author       
+// @version      v0.3.3-20250225
 // @description  ToolBox for Novel Translate bot website
 // @match        https://books.fishhawk.top/*
 // @match        https://books1.fishhawk.top/*
@@ -13,11 +12,21 @@
 (function () {
     'use strict';
 
-    const CONFIG_VERSION = 12;
+    if (window._NTRToolBoxInstance) {
+        return;
+    }
+
+    window._NTRToolBoxInstance = true;
+
+    const CONFIG_VERSION = 14;
+    const VERSION = '0.3.3';
     const CONFIG_STORAGE_KEY = 'NTR_ToolBox_Config';
-    const IS_MOBIlE = /Mobi|Android/i.test(navigator.userAgent);
+    const IS_MOBILE = /Mobi|Android/i.test(navigator.userAgent);
     const domainAllowed = (location.hostname === 'books.fishhawk.top' || location.hostname === 'books1.fishhawk.top');
 
+    // -----------------------------------
+    // Module settings
+    // -----------------------------------
     function newBooleanSetting(nameDefault, boolDefault) {
         return { name: nameDefault, type: 'boolean', value: Boolean(boolDefault) };
     }
@@ -30,23 +39,28 @@
     function newSelectSetting(nameDefault, arrOptions, valDefault) {
         return { name: nameDefault, type: 'select', value: valDefault, options: arrOptions };
     }
-    function getModuleSetting(moduleObj, key) {
-        if (!moduleObj.settings) return;
-        const found = moduleObj.settings.find(x => x.name === key);
+    function getModuleSetting(mod, key) {
+        if (!mod.settings) return undefined;
+        const found = mod.settings.find(s => s.name === key);
         return found ? found.value : undefined;
     }
     function isModuleEnabledByWhitelist(modItem) {
-        if (!modItem.whitelist || !modItem.whitelist.trim()) return domainAllowed;
+        if (!modItem.whitelist || !modItem.whitelist.trim()) {
+            return domainAllowed;
+        }
         const parts = modItem.whitelist.split(/[,;\n]+/).map(s => s.trim()).filter(Boolean);
         return domainAllowed && parts.some(p => {
             if (p.endsWith('/*')) {
-                const basePath = p.slice(0, -2);
-                return location.pathname.startsWith(basePath + '/');
+                const base = p.slice(0, -2);
+                return location.pathname.startsWith(base + '/');
             }
-            return location.pathname.indexOf(p) !== -1;
+            return location.pathname.includes(p);
         });
     }
 
+    // -----------------------------------
+    // Module definitions
+    // -----------------------------------
     const moduleAddSakuraTranslator = {
         name: '添加Sakura翻譯器',
         type: 'onclick',
@@ -58,36 +72,37 @@
             newStringSetting('鏈接', 'https://sakura-share.one'),
             newStringSetting('bind', 'none'),
         ],
-        run: async function (configObj) {
-            const totalCount = getModuleSetting(configObj, '數量') || 1;
-            const namePrefix = getModuleSetting(configObj, '名稱') || '';
-            const linkValue = getModuleSetting(configObj, '鏈接') || '';
-            const delayValue = getModuleSetting(configObj, '延遲') || 5;
+        run: async function (cfg) {
+            const totalCount = getModuleSetting(cfg, '數量') || 1;
+            const namePrefix = getModuleSetting(cfg, '名稱') || '';
+            const linkValue = getModuleSetting(cfg, '鏈接') || '';
+            const delayValue = getModuleSetting(cfg, '延遲') || 5;
             const delay = ms => new Promise(r => setTimeout(r, ms));
             let currentIndex = 1;
+
             async function closeTab() {
-                const closeButton = document.querySelector(
+                const btn = document.querySelector(
                     'button[aria-label="close"].n-base-close,button.n-base-close[aria-label="close"],button.n-base-close.n-base-close--absolute.n-card-header__close'
                 );
-                if (closeButton) closeButton.click();
+                if (btn) btn.click();
             }
             async function openAddTab() {
                 const addBtn = Array.from(document.querySelectorAll('button.n-button'))
                     .find(btn => {
                         const txt = (btn.querySelector('.n-button__content') || {}).textContent || '';
-                        return txt.trim().indexOf('添加翻译器') !== -1;
+                        return txt.includes('添加翻译器');
                     });
                 if (addBtn) addBtn.click();
             }
             async function fillForm() {
-                const nameInput = document.querySelector('input.n-input__input-el[placeholder="给你的翻译器起个名字"]');
-                const linkInput = document.querySelector('input.n-input__input-el[placeholder="翻译器的链接"]');
-                const segInput = document.querySelectorAll('input.n-input__input-el[placeholder="请输入"]')[0];
-                const preInput = document.querySelectorAll('input.n-input__input-el[placeholder="请输入"]')[1];
+                const nameInput = document.querySelector('input[placeholder="给你的翻译器起个名字"]');
+                const linkInput = document.querySelector('input[placeholder="翻译器的链接"]');
+                const segInput = document.querySelectorAll('input[placeholder="请输入"]')[0];
+                const preInput = document.querySelectorAll('input[placeholder="请输入"]')[1];
                 const addBtn = Array.from(document.querySelectorAll('button.n-button.n-button--primary-type'))
-                    .find(btn => {
-                        const txt = (btn.querySelector('.n-button__content') || {}).textContent || '';
-                        return txt.trim().indexOf('添加') !== -1;
+                    .find(b => {
+                        const txt = (b.querySelector('.n-button__content') || {}).textContent || '';
+                        return txt.includes('添加');
                     });
                 if (nameInput && linkInput && segInput && preInput && addBtn) {
                     nameInput.value = namePrefix + currentIndex;
@@ -104,6 +119,7 @@
                     }
                 }
             }
+
             await openAddTab();
             await delay(300);
             await fillForm();
@@ -125,15 +141,16 @@
             newStringSetting('Key', 'sk-wait-for-input'),
             newStringSetting('bind', 'none'),
         ],
-        run: async function (configObj) {
-            const countVal = getModuleSetting(configObj, '數量') || 1;
-            const namePrefixVal = getModuleSetting(configObj, '名稱') || '';
-            const modelVal = getModuleSetting(configObj, '模型') || '';
-            const apiKeyVal = getModuleSetting(configObj, 'Key') || '';
-            const apiUrlVal = getModuleSetting(configObj, '鏈接') || '';
-            const delayValue = getModuleSetting(configObj, '延遲') || 5;
+        run: async function (cfg) {
+            const countVal = getModuleSetting(cfg, '數量') || 1;
+            const namePrefixVal = getModuleSetting(cfg, '名稱') || '';
+            const modelVal = getModuleSetting(cfg, '模型') || '';
+            const apiKeyVal = getModuleSetting(cfg, 'Key') || '';
+            const apiUrlVal = getModuleSetting(cfg, '鏈接') || '';
+            const delayValue = getModuleSetting(cfg, '延遲') || 5;
             const delay = ms => new Promise(r => setTimeout(r, ms));
             let currentIndex = 1;
+
             async function closeTab() {
                 const cBtn = document.querySelector(
                     'button[aria-label="close"].n-base-close,button.n-base-close[aria-label="close"],button.n-base-close.n-base-close--absolute.n-card-header__close'
@@ -144,19 +161,19 @@
                 const addBtn = Array.from(document.querySelectorAll('button.n-button'))
                     .find(btn => {
                         const txt = (btn.querySelector('.n-button__content') || {}).textContent || '';
-                        return txt.trim().indexOf('添加翻译器') !== -1;
+                        return txt.includes('添加翻译器');
                     });
                 if (addBtn) addBtn.click();
             }
             async function fillForm() {
-                const nameInput = document.querySelector('input.n-input__input-el[placeholder="给你的翻译器起个名字"]');
-                const modelInput = document.querySelector('input.n-input__input-el[placeholder="模型名称"]');
-                const urlInput = document.querySelector('input.n-input__input-el[placeholder="兼容OpenAI的API链接，默认使用deepseek"]');
-                const keyInput = document.querySelector('input.n-input__input-el[placeholder="请输入Api key"]');
+                const nameInput = document.querySelector('input[placeholder="给你的翻译器起个名字"]');
+                const modelInput = document.querySelector('input[placeholder="模型名称"]');
+                const urlInput = document.querySelector('input[placeholder="兼容OpenAI的API链接，默认使用deepseek"]');
+                const keyInput = document.querySelector('input[placeholder="请输入Api key"]');
                 const confirmBtn = Array.from(document.querySelectorAll('button.n-button.n-button--primary-type'))
-                    .find(btn => {
-                        const txt = (btn.querySelector('.n-button__content') || {}).textContent || '';
-                        return txt.trim().indexOf('添加') !== -1;
+                    .find(b => {
+                        const txt = (b.querySelector('.n-button__content') || {}).textContent || '';
+                        return txt.includes('添加');
                     });
                 if (nameInput && modelInput && urlInput && keyInput && confirmBtn) {
                     nameInput.value = namePrefixVal + currentIndex;
@@ -175,6 +192,7 @@
                     }
                 }
             }
+
             await openAddTab();
             await delay(300);
             await fillForm();
@@ -191,21 +209,25 @@
             newStringSetting('排除', '共享,本机,AutoDL'),
             newStringSetting('bind', 'none'),
         ],
-        run: async function (configObj) {
-            const excludeStr = getModuleSetting(configObj, '排除') || '';
+        run: async function (cfg) {
+            const excludeStr = getModuleSetting(cfg, '排除') || '';
             const excludeArr = excludeStr.split(',').filter(x => x);
             const listItems = document.querySelectorAll('.n-list-item');
-            Array.from(listItems).forEach(li => {
+            [...listItems].forEach(li => {
                 const titleEl = li.querySelector('.n-thing-header__title');
                 if (!titleEl) return;
                 const titleText = titleEl.textContent.trim();
-                const keep = excludeArr.some(x => titleText.indexOf(x) !== -1);
+                const keep = excludeArr.some(x => titleText.includes(x));
                 if (!keep) {
                     const delBtn = li.querySelector('.n-button--error-type');
-                    const parentEl = delBtn && delBtn.parentElement;
-                    if (parentEl) {
-                        const siblingBtns = parentEl.querySelectorAll('button');
-                        if (siblingBtns.length === 5 && delBtn) delBtn.click();
+                    if (delBtn) {
+                        const parentEl = delBtn.parentElement;
+                        if (parentEl) {
+                            const siblingBtns = parentEl.querySelectorAll('button');
+                            if (siblingBtns.length === 5) {
+                                delBtn.click();
+                            }
+                        }
                     }
                 }
             });
@@ -219,22 +241,29 @@
         settings: [
             newNumberSetting('延遲間隔', 50),
             newNumberSetting('最多啟動', 999),
+            newBooleanSetting('避免無效啟動', true),
             newStringSetting('bind', 'none'),
         ],
-        run: async function (configObj) {
+        run: async function (cfg) {
+            const intervalVal = getModuleSetting(cfg, '延遲間隔') || 50;
+            const maxClick = getModuleSetting(cfg, '最多啟動') || 999;
+            const noEmptyLaunch = getModuleSetting(cfg, '避免無效啟動');
             const allBtns = document.querySelectorAll('button');
-            const intervalVal = getModuleSetting(configObj, '延遲間隔') || 50;
-            const maxClick = Math.min(getModuleSetting(configObj, '最多啟動') || 999, allBtns.length);
             const delay = ms => new Promise(r => setTimeout(r, ms));
-            let idx = 0, clickCount = 0;
+            let idx = 0, clickCount = 0, lastRunning = 0, emptyCheck = 0;
+
             async function nextClick() {
                 while (idx < allBtns.length && clickCount < maxClick) {
-                    const btn = allBtns[idx];
-                    idx++;
-                    if (btn.textContent.indexOf('启动') !== -1 || btn.textContent.indexOf('啟動') !== -1) {
+                    const btn = allBtns[idx++];
+                    if (btn.textContent.includes('启动')) {
                         btn.click();
                         clickCount++;
                         await delay(intervalVal);
+                    }
+                    if (noEmptyLaunch) {
+                        let running = [...document.querySelectorAll('button')].filter(btn => btn.textContent.includes('停止')).length;
+                        if (running == lastRunning) emptyCheck++;
+                        if (emptyCheck > 3) break;
                     }
                 }
             }
@@ -253,13 +282,14 @@
             newNumberSetting('並行數量', 5),
             newStringSetting('bind', 'none'),
         ],
-        run: async function (configObj) {
+        run: async function (cfg) {
             const delay = ms => new Promise(r => setTimeout(r, ms));
-            const pollInterval = getModuleSetting(configObj, '並行延遲') || 300;
-            const concurrentLimit = getModuleSetting(configObj, '並行數量') || 5;
-            const mode = getModuleSetting(configObj, '模式');
+            const pollInterval = getModuleSetting(cfg, '並行延遲') || 300;
+            const concurrentLimit = getModuleSetting(cfg, '並行數量') || 5;
+            const mode = getModuleSetting(cfg, '模式');
             const modeMap = { '常規': '常规', '過期': '过期', '重翻': '重翻' };
             const cnMode = modeMap[mode] || '常规';
+
             async function setMode(doc) {
                 const tags = doc.querySelectorAll('.n-tag__content');
                 for (let i = 0; i < tags.length; i++) {
@@ -270,32 +300,38 @@
                 }
             }
             async function clickSakuraButtons(doc) {
-                const btns = Array.from(doc.querySelectorAll('button')).filter(b =>
-                    b.textContent.indexOf('排队Sakura') !== -1
+                const btns = [...doc.querySelectorAll('button')].filter(b =>
+                    b.textContent.includes('排队Sakura')
                 );
                 btns.forEach(btn => {
                     btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
                 });
             }
+
             if (location.pathname !== '/wenku') {
+                // direct run
                 setMode(document);
                 await clickSakuraButtons(document);
                 return;
             }
             const domain = window.location.origin;
-            const allLinks = Array.from(document.querySelectorAll('a[href]'))
+            const allLinks = [...document.querySelectorAll('a[href]')]
                 .map(a => a.href)
                 .filter(href => href.startsWith(domain) && /\/wenku\/[^/]+/.test(href));
-            const uniqueLinks = Array.from(new Set(allLinks));
-            async function waitForTabLoad(newTab) {
+            const uniqueLinks = [...new Set(allLinks)];
+
+            async function waitForTabLoad(tab) {
                 const maxWait = 10000;
                 const startTime = Date.now();
                 while (true) {
                     await delay(pollInterval);
-                    if (!newTab || newTab.closed) {
+                    if (!tab || tab.closed) {
                         throw new Error('New tab was closed or blocked before loading.');
                     }
-                    if (newTab.document && (newTab.document.readyState === 'complete' || newTab.document.querySelector('.n-tag__content'))) {
+                    if (
+                        tab.document &&
+                        (tab.document.readyState === 'complete' || tab.document.querySelector('.n-tag__content'))
+                    ) {
                         break;
                     }
                     if (Date.now() - startTime > maxWait) {
@@ -313,6 +349,7 @@
                 await clickSakuraButtons(newTab.document);
                 newTab.close();
             }
+
             let activeCount = 0, index = 0;
             async function spawnNext() {
                 if (index >= uniqueLinks.length) return;
@@ -351,13 +388,14 @@
             newNumberSetting('並行數量', 5),
             newStringSetting('bind', 'none'),
         ],
-        run: async function (configObj) {
+        run: async function (cfg) {
             const delay = ms => new Promise(r => setTimeout(r, ms));
-            const pollInterval = getModuleSetting(configObj, '並行延遲') || 300;
-            const concurrentLimit = getModuleSetting(configObj, '並行數量') || 5;
-            const mode = getModuleSetting(configObj, '模式');
+            const pollInterval = getModuleSetting(cfg, '並行延遲') || 300;
+            const concurrentLimit = getModuleSetting(cfg, '並行數量') || 5;
+            const mode = getModuleSetting(cfg, '模式');
             const modeMap = { '常規': '常规', '過期': '过期', '重翻': '重翻' };
             const cnMode = modeMap[mode] || '常规';
+
             function setMode(doc) {
                 const tags = doc.querySelectorAll('.n-tag__content');
                 for (let i = 0; i < tags.length; i++) {
@@ -368,8 +406,8 @@
                 }
             }
             async function clickGPTButtons(doc) {
-                const btns = Array.from(doc.querySelectorAll('button')).filter(b =>
-                    b.textContent.indexOf('排队GPT') !== -1
+                const btns = [...doc.querySelectorAll('button')].filter(b =>
+                    b.textContent.includes('排队GPT')
                 );
                 btns.forEach(btn => {
                     btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -381,19 +419,23 @@
                 return;
             }
             const domain = window.location.origin;
-            const allLinks = Array.from(document.querySelectorAll('a[href]'))
+            const allLinks = [...document.querySelectorAll('a[href]')]
                 .map(a => a.href)
                 .filter(href => href.startsWith(domain) && /\/wenku\/[^/]+/.test(href));
-            const uniqueLinks = Array.from(new Set(allLinks));
-            async function waitForTabLoad(newTab) {
+            const uniqueLinks = [...new Set(allLinks)];
+
+            async function waitForTabLoad(tab) {
                 const maxWait = 10000;
                 const startTime = Date.now();
                 while (true) {
                     await delay(pollInterval);
-                    if (!newTab || newTab.closed) {
+                    if (!tab || tab.closed) {
                         throw new Error('New tab was closed or blocked before loading.');
                     }
-                    if (newTab.document && (newTab.document.readyState === 'complete' || newTab.document.querySelector('.n-tag__content'))) {
+                    if (
+                        tab.document &&
+                        (tab.document.readyState === 'complete' || tab.document.querySelector('.n-tag__content'))
+                    ) {
                         break;
                     }
                     if (Date.now() - startTime > maxWait) {
@@ -438,54 +480,64 @@
         }
     };
 
+    const moduleQueueWebSakura = {
+
+    }
+    
     const moduleAutoRetry = {
         name: '自動重試',
         type: 'keep',
         whitelist: '/workspace/*',
-        settings: [
-            newNumberSetting('最大重試次數', 3),
+        settings: [ 
+            newNumberSetting('最大重試次數', 99),
+            newBooleanSetting('重啟翻譯器', true),
         ],
-        _keepIntervalId: null,
-        _keepActive: false,
         _attempts: 0,
-        run: function (configObj) {
-            if (!this._keepActive) {
-                this._keepActive = true;
-                const maxAttempts = getModuleSetting(configObj, '最大重試次數');
-                document.addEventListener('click', function (e) {
+        _lastRun: 0,
+        _interval: 1000,
+        run: async function (cfg) {
+            const delay = ms => new Promise(r => setTimeout(r, ms));
+
+            const now = Date.now();
+            if (now - this._lastRun < this._interval) return;
+            this._lastRun = now;
+
+            const maxAttempts = getModuleSetting(cfg, '最大重試次數') || 99;
+            const relaunch = getModuleSetting(cfg, '重啟翻譯器') || 3;
+
+            if (!this._boundClickHandler) {
+                this._boundClickHandler = (e) => {
                     if (e.target.tagName === 'BUTTON') {
                         this._attempts = 0;
                     }
-                }.bind(this));
-                this._keepIntervalId = setInterval(function () {
-                    const listItems = document.querySelectorAll('.n-list-item');
-                    const unfinishedItems = Array.from(listItems).filter(item => {
-                        const desc = item.querySelector('.n-thing-main__description');
-                        return desc && desc.textContent.indexOf('未完成') !== -1;
-                    });
-                    if (unfinishedItems.length > 0 && this._attempts < maxAttempts) {
-                        const hasStopButton = Array.from(document.querySelectorAll('button')).some(btn =>
-                            btn.textContent === '停止'
-                        );
-                        if (!hasStopButton) {
-                            const retryButtons = Array.from(document.querySelectorAll('button')).filter(btn =>
-                                btn.textContent.indexOf('重试未完成任务') !== -1
-                            );
-                            const clickCount = Math.min(unfinishedItems.length, listItems.length);
-                            if (retryButtons[0]) {
-                                for (let i = 0; i < clickCount; i++) {
-                                    retryButtons[0].click();
-                                }
-                                this._attempts++;
-                            }
+                };
+                document.addEventListener('click', this._boundClickHandler);
+            }
+
+            const listItems = document.querySelectorAll('.n-list-item');
+            const unfinished = [...listItems].filter(item => {
+                const desc = item.querySelector('.n-thing-main__description');
+                return desc && desc.textContent.includes('未完成');
+            });
+            async function retryTasks() {
+                const hasStop = [...document.querySelectorAll('button')].some(b => b.textContent === '停止');
+                if (!hasStop) {
+                    const retryBtns = [...document.querySelectorAll('button')].filter(b => b.textContent.includes('重试未完成任务'));
+                    if (retryBtns[0]) {
+                        const clickCount = Math.min(unfinished.length, listItems.length);
+                        for (let i = 0; i < clickCount; i++) {
+                            retryBtns[0].click();
                         }
+                        this._attempts++;
                     }
-                }.bind(this), 1000);
-            } else {
-                this._keepActive = false;
-                if (this._keepIntervalId) {
-                    clearInterval(this._keepIntervalId);
-                    this._keepIntervalId = null;
+                }
+            }
+
+            if (unfinished.length > 0 && this._attempts < maxAttempts) {
+                await retryTasks();
+                delay(10);
+                if (relaunch) {
+                    script.runModule('啟動翻譯器');
                 }
             }
         }
@@ -495,50 +547,60 @@
         name: '緩存優化',
         type: 'keep',
         whitelist: '',
-        settings: [
-            newNumberSetting('同步間隔', 1000),
-        ],
-        run: async function (configObj) {
-            const interval = getModuleSetting(configObj, '同步間隔') || 1000;
+        settings: [ newNumberSetting('同步間隔', 1000) ],
+        _lastRun: 0,
+        _proxyDefined: false,
+        run: async function (cfg) {
+            const now = Date.now();
+            const intervalMs = getModuleSetting(cfg, '同步間隔') || 1000;
+            if (now - this._lastRun < intervalMs) return;
+            this._lastRun = now;
+
             const origSession = window.sessionStorage;
-            try {
-                const proxyStorage = new Proxy(origSession, {
-                    get: function (target, prop) {
-                        if (typeof prop === 'string') {
-                            let val = target[prop];
-                            if (val === undefined) {
-                                val = localStorage.getItem(prop);
-                                if (val !== null) target.setItem(prop, val);
+            if (!this._proxyDefined) {
+                this._proxyDefined = true;
+                try {
+                    const proxyStorage = new Proxy(origSession, {
+                        get(target, prop) {
+                            if (typeof prop === 'string') {
+                                let val = target[prop];
+                                if (val === undefined) {
+                                    val = localStorage.getItem(prop);
+                                    if (val !== null) {
+                                        target.setItem(prop, val);
+                                    }
+                                }
+                                return val;
                             }
-                            return val;
+                            return target[prop];
+                        },
+                        set(target, prop, value) {
+                            target[prop] = value;
+                            localStorage.setItem(prop, value);
+                            return true;
                         }
-                        return target[prop];
-                    },
-                    set: function (target, prop, value) {
-                        target[prop] = value;
-                        localStorage.setItem(prop, value);
-                        return true;
-                    }
-                });
-                Object.defineProperty(window, 'sessionStorage', { value: proxyStorage, configurable: true });
-            } catch (e) { }
-            setInterval(function () {
-                for (let i = 0; i < localStorage.length; i++) {
-                    const key = localStorage.key(i);
-                    const localVal = localStorage.getItem(key);
-                    const sessVal = origSession[key];
-                    if (sessVal !== localVal) {
-                        origSession[key] = localVal;
-                        try {
-                            window.dispatchEvent(new StorageEvent('storage', {
-                                key: key,
-                                newValue: localVal,
-                                storageArea: origSession
-                            }));
-                        } catch (e) { }
-                    }
+                    });
+                    Object.defineProperty(window, 'sessionStorage', { value: proxyStorage, configurable: true });
+                } catch (e) {
+                    console.error('Failed setting proxy for sessionStorage:', e);
                 }
-            }, interval);
+            }
+            // Sync localStorage -> sessionStorage
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                const localVal = localStorage.getItem(key);
+                const sessVal = origSession[key];
+                if (sessVal !== localVal) {
+                    origSession[key] = localVal;
+                    try {
+                        window.dispatchEvent(new StorageEvent('storage', {
+                            key,
+                            newValue: localVal,
+                            storageArea: origSession
+                        }));
+                    } catch (e) {}
+                }
+            }
         }
     };
 
@@ -553,6 +615,9 @@
         moduleCacheOptimization
     ];
 
+    // -----------------------------------
+    // Drag Handler
+    // -----------------------------------
     function DragHandler(panel, title) {
         this.panel = panel;
         this.title = title;
@@ -565,7 +630,8 @@
         const self = this;
         this.title.addEventListener('mousedown', function (e) {
             if (e.button !== 0) return;
-            self.panel.style.transition = 'width 0.3s ease';
+            // Disable transitions while dragging
+            self.panel.style.transition = 'none';
             self.dragging = true;
             self.offsetX = e.clientX - self.panel.offsetLeft;
             self.offsetY = e.clientY - self.panel.offsetTop;
@@ -577,18 +643,26 @@
             const newTop = e.clientY - self.offsetY;
             self.panel.style.left = newLeft + 'px';
             self.panel.style.top = newTop + 'px';
-            clampPanel();
+            clampPosition();
         });
-        document.addEventListener('mouseup', function (e) {
+        document.addEventListener('mouseup', function () {
             if (!self.dragging) return;
-            self.panel.style.transition = 'width 0.3s ease, height 0.3s ease, top 0.3s ease, left 0.3s ease';
             self.dragging = false;
+            // Re-enable transitions
+            self.panel.style.transition = 'width 0.3s ease, height 0.3s ease, top 0.3s ease, left 0.3s ease';
+            const rect = self.panel.getBoundingClientRect();
+            let left = rect.left;
+            let top = rect.top;
+            left = Math.min(Math.max(left, 0), window.innerWidth - rect.width);
+            top = Math.min(Math.max(top, 0), window.innerHeight - rect.height);
+            self.panel.style.left = left + 'px';
+            self.panel.style.top = top + 'px';
             localStorage.setItem('ntr-panel-position', JSON.stringify({
                 left: self.panel.style.left,
                 top: self.panel.style.top
             }));
         });
-        function clampPanel() {
+        function clampPosition() {
             const rect = self.panel.getBoundingClientRect();
             let left = parseFloat(self.panel.style.left) || 0;
             let top = parseFloat(self.panel.style.top) || 0;
@@ -606,97 +680,80 @@
     function getAnchorCornerInfo(rect) {
         const centerX = rect.left + rect.width / 2;
         const centerY = rect.top + rect.height / 2;
-        const horizontal = centerX < window.innerWidth / 2 ? 'left' : 'right';
-        const vertical = centerY < window.innerHeight / 2 ? 'top' : 'bottom';
-        return { corner: vertical + '-' + horizontal, x: horizontal === 'left' ? rect.left : rect.right, y: vertical === 'top' ? rect.top : rect.bottom };
+        const horizontal = (centerX < window.innerWidth / 2) ? 'left' : 'right';
+        const vertical = (centerY < window.innerHeight / 2) ? 'top' : 'bottom';
+        return {
+            corner: vertical + '-' + horizontal,
+            x: (horizontal === 'left' ? rect.left : rect.right),
+            y: (vertical === 'top' ? rect.top : rect.bottom)
+        };
     }
 
-    NTRToolBox.prototype.adjustPanelPosition = function () {
-        const rect = this.panel.getBoundingClientRect();
-        let anchor = null;
-        try {
-            anchor = JSON.parse(localStorage.getItem('ntr-panel-anchor'));
-        } catch (e) {}
-        let newLeft, newTop;
-        if (anchor && anchor.corner) {
-            if (anchor.corner === 'top-left') {
-                newLeft = anchor.x;
-                newTop = anchor.y;
-            } else if (anchor.corner === 'top-right') {
-                newLeft = anchor.x - rect.width;
-                newTop = anchor.y;
-            } else if (anchor.corner === 'bottom-left') {
-                newLeft = anchor.x;
-                newTop = anchor.y - rect.height;
-            } else if (anchor.corner === 'bottom-right') {
-                newLeft = anchor.x - rect.width;
-                newTop = anchor.y - rect.height;
-            }
-        } else {
-            newLeft = rect.left;
-            newTop = rect.top;
-        }
-        newLeft = Math.min(Math.max(newLeft, 0), window.innerWidth - rect.width);
-        newTop = Math.min(Math.max(newTop, 0), window.innerHeight - rect.height);
-        this.panel.style.left = newLeft + 'px';
-        this.panel.style.top = newTop + 'px';
-        localStorage.setItem('ntr-panel-position', JSON.stringify({ left: this.panel.style.left, top: this.panel.style.top }));
-    };
-
+    // -----------------------------------
+    // Main Toolbox
+    // -----------------------------------
     function NTRToolBox() {
         this.configuration = this.loadConfiguration();
-        this.keepIntervals = new Map();
         this.keepActiveSet = new Set();
         this.headerMap = new Map();
+        this._pollTimer = null;
+
+        this._lastKeepRun = 0;
+        this._lastVisRun = 0;
+    
         this.buildGUI();
         this.attachGlobalKeyBindings();
         this.loadKeepStateAndStart();
-        const self = this;
-        setInterval(function () {
-            self.updateModuleVisibility();
-        }, 500);
+        this.scheduleNextPoll();
     }
 
     function cloneDefaultModules() {
         return defaultModules.map(m => ({
             ...m,
-            settings: m.settings ? m.settings.map(s => ({ ...s })) : []
+            settings: m.settings ? m.settings.map(s => ({ ...s })) : [],
+            _lastRun: 0
         }));
     }
-    
+
     NTRToolBox.prototype.loadConfiguration = function () {
-        let tempStorage;
+        let stored;
         try {
-            tempStorage = JSON.parse(localStorage.getItem(CONFIG_STORAGE_KEY));
-        } catch (e) { }
-        if (!tempStorage || tempStorage.version !== CONFIG_VERSION) {
-            return { version: CONFIG_VERSION, modules: cloneDefaultModules() };
+            stored = JSON.parse(localStorage.getItem(CONFIG_STORAGE_KEY));
+        } catch (e) {}
+        if (!stored || stored.version !== CONFIG_VERSION) {
+            const fresh = cloneDefaultModules();
+            return { version: CONFIG_VERSION, modules: fresh };
         }
-        const loadedModules = cloneDefaultModules();
-        tempStorage.modules.forEach(function (storedModule) {
-            const defMod = loadedModules.find(m => m.name === storedModule.name);
+        const loaded = cloneDefaultModules();
+        stored.modules.forEach(storedMod => {
+            const defMod = loaded.find(m => m.name === storedMod.name);
             if (defMod) {
-                for (const k in storedModule) {
-                    if (defMod.hasOwnProperty(k) && typeof defMod[k] === typeof storedModule[k] && storedModule[k] !== undefined) {
-                        defMod[k] = storedModule[k];
+                for (const k in storedMod) {
+                    if (
+                        defMod.hasOwnProperty(k) &&
+                        typeof defMod[k] === typeof storedMod[k] &&
+                        storedMod[k] !== undefined
+                    ) {
+                        defMod[k] = storedMod[k];
                     }
                 }
             }
         });
-        if (loadedModules.length !== defaultModules.length) {
+        if (loaded.length !== defaultModules.length) {
             const fresh = cloneDefaultModules();
             localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify({ version: CONFIG_VERSION, modules: fresh }));
             return { version: CONFIG_VERSION, modules: fresh };
         } else {
             const defNames = defaultModules.map(x => x.name).sort().join(',');
-            const storedNames = loadedModules.map(x => x.name).sort().join(',');
+            const storedNames = loaded.map(x => x.name).sort().join(',');
             if (defNames !== storedNames) {
                 const fresh = cloneDefaultModules();
                 localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify({ version: CONFIG_VERSION, modules: fresh }));
                 return { version: CONFIG_VERSION, modules: fresh };
             }
         }
-        loadedModules.forEach(function (m) {
+        // Reattach run
+        loaded.forEach(m => {
             const found = defaultModules.find(d => d.name === m.name);
             if (found && typeof found.run === 'function') {
                 for (const p in found) {
@@ -707,7 +764,7 @@
                 m.run = found.run;
             }
         });
-        return { version: CONFIG_VERSION, modules: loadedModules };
+        return { version: CONFIG_VERSION, modules: loaded };
     };
 
     NTRToolBox.prototype.saveConfiguration = function () {
@@ -717,6 +774,8 @@
     NTRToolBox.prototype.buildGUI = function () {
         this.panel = document.createElement('div');
         this.panel.id = 'ntr-panel';
+
+        // restore from localStorage
         const savedPos = localStorage.getItem('ntr-panel-position');
         if (savedPos) {
             try {
@@ -725,270 +784,286 @@
                     this.panel.style.left = parsed.left;
                     this.panel.style.top = parsed.top;
                 }
-            } catch (e) { }
+            } catch (e) {}
         }
+
         this.isMinimized = false;
         this.titleBar = document.createElement('div');
         this.titleBar.className = 'ntr-titlebar';
-        this.titleBar.innerHTML = 'NTR ToolBox v0.3.1';
+        this.titleBar.innerHTML = 'NTR ToolBox ' + VERSION;
+
         this.toggleSpan = document.createElement('span');
         this.toggleSpan.style.float = 'right';
         this.toggleSpan.textContent = '[-]';
         this.titleBar.appendChild(this.toggleSpan);
+
         this.panel.appendChild(this.titleBar);
+
         this.panelBody = document.createElement('div');
         this.panelBody.className = 'ntr-panel-body';
         this.panel.appendChild(this.panelBody);
+
         this.infoBar = document.createElement('div');
         this.infoBar.className = 'ntr-info';
         const leftInfo = document.createElement('span');
         const rightInfo = document.createElement('span');
-        if (IS_MOBIlE) {
-            leftInfo.textContent = '單擊執行 | ⚙️設定';
-        } else {
-            leftInfo.textContent = '左鍵執行/切換 | 右鍵設定';
-        }
+        leftInfo.textContent = IS_MOBILE
+            ? '單擊執行 | ⚙️設定'
+            : '左鍵執行/切換 | 右鍵設定';
         rightInfo.textContent = 'Author: TheNano(百合仙人)';
         this.infoBar.appendChild(leftInfo);
         this.infoBar.appendChild(rightInfo);
         this.panel.appendChild(this.infoBar);
+
         document.body.appendChild(this.panel);
+
+        // set up drag
         this.dragHandler = new DragHandler(this.panel, this.titleBar);
+
         this.buildModules();
-        const self = this;
-        setTimeout(function () {
-            self.expandedWidth = self.panel.offsetWidth;
-            self.expandedHeight = self.panel.offsetHeight;
-            const wasMin = self.isMinimized;
-            if (!wasMin) self.panel.classList.add('minimized');
-            const h0 = self.panel.offsetHeight;
-            if (!wasMin) self.panel.classList.remove('minimized');
-            self.minimizedWidth = self.panel.offsetWidth;
-            self.minimizedHeight = h0;
-            self.adjustPanelPosition();
+
+        setTimeout(() => {
+            this.expandedWidth = this.panel.offsetWidth;
+            this.expandedHeight = this.panel.offsetHeight;
+
+            const wasMin = this.isMinimized;
+            if (!wasMin) this.panel.classList.add('minimized');
+            const h0 = this.panel.offsetHeight;
+            if (!wasMin) this.panel.classList.remove('minimized');
+
+            this.minimizedWidth = this.panel.offsetWidth;
+            this.minimizedHeight = h0;
         }, 150);
-        const selfRef = this;
-        if (IS_MOBIlE) {
-            this.titleBar.addEventListener('click', function (e) {
-                if (!selfRef.dragHandler.dragging) {
+
+        if (IS_MOBILE) {
+            this.titleBar.addEventListener('click', e => {
+                if (!this.dragHandler.dragging) {
                     e.preventDefault();
-                    selfRef.setMinimizedState(!selfRef.isMinimized);
+                    this.setMinimizedState(!this.isMinimized);
                 }
             });
         } else {
-            this.titleBar.addEventListener('contextmenu', function (e) {
+            this.titleBar.addEventListener('contextmenu', e => {
                 e.preventDefault();
-                selfRef.setMinimizedState(!selfRef.isMinimized);
+                this.setMinimizedState(!this.isMinimized);
             });
         }
     };
 
     NTRToolBox.prototype.buildModules = function () {
         this.panelBody.innerHTML = '';
-        this.headerMap = new Map();
-        const self = this;
-        this.configuration.modules.forEach(function (modItem) {
-            const moduleContainer = document.createElement('div');
-            moduleContainer.className = 'ntr-module-container';
-            const moduleHeader = document.createElement('div');
-            moduleHeader.className = 'ntr-module-header';
+        this.headerMap.clear();
+
+        this.configuration.modules.forEach(mod => {
+            const container = document.createElement('div');
+            container.className = 'ntr-module-container';
+
+            const header = document.createElement('div');
+            header.className = 'ntr-module-header';
+
             const nameSpan = document.createElement('span');
-            nameSpan.textContent = modItem.name;
-            moduleHeader.appendChild(nameSpan);
-            if (!IS_MOBIlE) {
+            nameSpan.textContent = mod.name;
+            header.appendChild(nameSpan);
+
+            if (!IS_MOBILE) {
                 const iconSpan = document.createElement('span');
-                iconSpan.textContent = (modItem.type === 'keep' ? '⇋' : '▶');
+                iconSpan.textContent = (mod.type === 'keep') ? '⇋' : '▶';
                 iconSpan.style.marginLeft = '8px';
-                moduleHeader.appendChild(iconSpan);
+                header.appendChild(iconSpan);
             }
-            const settingsContainer = document.createElement('div');
-            settingsContainer.className = 'ntr-settings-container';
-            settingsContainer.style.display = 'none';
-            if (IS_MOBIlE) {
-                const settingsBtn = document.createElement('button');
-                settingsBtn.textContent = '⚙️';
-                settingsBtn.style.color = 'white';
-                settingsBtn.style.float = 'right';
-                settingsBtn.onclick = function (e) {
+
+            const settingsDiv = document.createElement('div');
+            settingsDiv.className = 'ntr-settings-container';
+            settingsDiv.style.display = 'none';
+
+            if (IS_MOBILE) {
+                const btn = document.createElement('button');
+                btn.textContent = '⚙️';
+                btn.style.color = 'white';
+                btn.style.float = 'right';
+                btn.onclick = e => {
                     e.stopPropagation();
-                    const curDisp = settingsContainer.style.display || window.getComputedStyle(settingsContainer).display;
-                    settingsContainer.style.display = (curDisp === 'none' ? 'block' : 'none');
+                    const styleVal = window.getComputedStyle(settingsDiv).display;
+                    settingsDiv.style.display = (styleVal === 'none' ? 'block' : 'none');
                 };
-                moduleHeader.appendChild(settingsBtn);
-                moduleHeader.onclick = function (e) {
-                    if (e.target.classList.contains('ntr-bind-button') || e.target === settingsBtn) return;
-                    self.handleModuleClick(modItem, moduleHeader);
+                header.appendChild(btn);
+
+                header.onclick = e => {
+                    if (e.target.classList.contains('ntr-bind-button') || e.target === btn) return;
+                    this.handleModuleClick(mod, header);
                 };
             } else {
-                moduleHeader.oncontextmenu = function (e) {
+                header.oncontextmenu = e => {
                     e.preventDefault();
-                    const curDisp = settingsContainer.style.display || window.getComputedStyle(settingsContainer).display;
-                    settingsContainer.style.display = (curDisp === 'none' ? 'block' : 'none');
+                    const styleVal = window.getComputedStyle(settingsDiv).display;
+                    settingsDiv.style.display = (styleVal === 'none' ? 'block' : 'none');
                 };
-                moduleHeader.onclick = function (e) {
+                header.onclick = e => {
                     if (e.button === 0 && !e.ctrlKey && !e.altKey && !e.shiftKey) {
                         if (e.target.classList.contains('ntr-bind-button')) return;
-                        self.handleModuleClick(modItem, moduleHeader);
+                        this.handleModuleClick(mod, header);
                     }
                 };
             }
-            if (Array.isArray(modItem.settings)) {
-                modItem.settings.forEach(function (sObj) {
+
+            // Build settings
+            if (Array.isArray(mod.settings)) {
+                mod.settings.forEach(s => {
                     const row = document.createElement('div');
                     row.style.marginBottom = '8px';
+
                     const label = document.createElement('label');
                     label.style.display = 'inline-block';
                     label.style.minWidth = '70px';
                     label.style.color = '#ccc';
-                    label.textContent = sObj.name + ': ';
+                    label.textContent = s.name + ': ';
                     row.appendChild(label);
+
                     let inputEl;
-                    if (sObj.type === 'boolean') {
-                        inputEl = document.createElement('input');
-                        inputEl.type = 'checkbox';
-                        inputEl.checked = !!sObj.value;
-                        inputEl.onchange = function () {
-                            sObj.value = inputEl.checked;
-                            self.saveConfiguration();
-                        };
-                    } else if (sObj.type === 'number') {
-                        inputEl = document.createElement('input');
-                        inputEl.type = 'number';
-                        inputEl.value = sObj.value;
-                        inputEl.className = 'ntr-number-input';
-                        inputEl.onchange = function () {
-                            sObj.value = Number(inputEl.value) || 0;
-                            self.saveConfiguration();
-                        };
-                    } else if (sObj.type === 'string' && sObj.name === 'bind') {
-                        inputEl = document.createElement('button');
-                        inputEl.className = 'ntr-bind-button';
-                        inputEl.textContent = (sObj.value === 'none' ? '(None)' : '[' + sObj.value.toUpperCase() + ']');
-                        inputEl.onclick = function () {
-                            inputEl.textContent = '(Press any key)';
-                            function handleKey(e2) {
-                                e2.preventDefault();
-                                if (e2.key === 'Escape') {
-                                    sObj.value = 'none';
-                                    inputEl.textContent = '(None)';
-                                    self.saveConfiguration();
-                                    document.removeEventListener('keydown', handleKey, true);
-                                    e2.stopPropagation();
-                                    return;
-                                }
-                                const pk = e2.key.toLowerCase();
-                                sObj.value = pk;
-                                inputEl.textContent = '[' + pk.toUpperCase() + ']';
-                                self.saveConfiguration();
-                                document.removeEventListener('keydown', handleKey, true);
-                                e2.stopPropagation();
+                    switch (s.type) {
+                        case 'boolean': {
+                            inputEl = document.createElement('input');
+                            inputEl.type = 'checkbox';
+                            inputEl.checked = !!s.value;
+                            inputEl.onchange = () => {
+                                s.value = inputEl.checked;
+                                this.saveConfiguration();
+                            };
+                            break;
+                        }
+                        case 'number': {
+                            inputEl = document.createElement('input');
+                            inputEl.type = 'number';
+                            inputEl.value = s.value;
+                            inputEl.className = 'ntr-number-input';
+                            inputEl.onchange = () => {
+                                s.value = Number(inputEl.value) || 0;
+                                this.saveConfiguration();
+                            };
+                            break;
+                        }
+                        case 'select': {
+                            inputEl = document.createElement('select');
+                            if (Array.isArray(s.options)) {
+                                s.options.forEach(opt => {
+                                    const optEl = document.createElement('option');
+                                    optEl.value = opt;
+                                    optEl.textContent = opt;
+                                    if (opt === s.value) optEl.selected = true;
+                                    inputEl.appendChild(optEl);
+                                });
                             }
-                            document.addEventListener('keydown', handleKey, true);
-                        };
-                    } else if (sObj.type === 'select' && Array.isArray(sObj.options)) {
-                        inputEl = document.createElement('select');
-                        sObj.options.forEach(function (opt) {
-                            const optEl = document.createElement('option');
-                            optEl.value = opt;
-                            optEl.textContent = opt;
-                            if (opt === sObj.value) {
-                                optEl.selected = true;
+                            inputEl.onchange = () => {
+                                s.value = inputEl.value;
+                                this.saveConfiguration();
+                            };
+                            break;
+                        }
+                        case 'string': {
+                            if (s.name === 'bind') {
+                                inputEl = document.createElement('button');
+                                inputEl.className = 'ntr-bind-button';
+                                inputEl.textContent = (s.value === 'none') ? '(None)' : `[${s.value.toUpperCase()}]`;
+                                inputEl.onclick = () => {
+                                    inputEl.textContent = '(Press any key)';
+                                    const handler = ev => {
+                                        ev.preventDefault();
+                                        if (ev.key === 'Escape') {
+                                            s.value = 'none';
+                                            inputEl.textContent = '(None)';
+                                        } else {
+                                            s.value = ev.key.toLowerCase();
+                                            inputEl.textContent = `[${ev.key.toUpperCase()}]`;
+                                        }
+                                        this.saveConfiguration();
+                                        document.removeEventListener('keydown', handler, true);
+                                        ev.stopPropagation();
+                                    };
+                                    document.addEventListener('keydown', handler, true);
+                                };
+                            } else {
+                                inputEl = document.createElement('input');
+                                inputEl.type = 'text';
+                                inputEl.value = s.value;
+                                inputEl.className = 'ntr-input';
+                                inputEl.onchange = () => {
+                                    s.value = inputEl.value;
+                                    this.saveConfiguration();
+                                };
                             }
-                            inputEl.appendChild(optEl);
-                        });
-                        inputEl.onchange = function () {
-                            sObj.value = inputEl.value;
-                            self.saveConfiguration();
-                        };
-                    } else if (sObj.type === 'string') {
-                        inputEl = document.createElement('input');
-                        inputEl.type = 'text';
-                        inputEl.value = sObj.value;
-                        inputEl.className = 'ntr-input';
-                        inputEl.onchange = function () {
-                            sObj.value = inputEl.value;
-                            self.saveConfiguration();
-                        };
-                    } else {
-                        inputEl = document.createElement('span');
-                        inputEl.style.color = '#999';
-                        inputEl.textContent = String(sObj.value);
+                            break;
+                        }
+                        default: {
+                            inputEl = document.createElement('span');
+                            inputEl.style.color = '#999';
+                            inputEl.textContent = String(s.value);
+                        }
                     }
                     row.appendChild(inputEl);
-                    settingsContainer.appendChild(row);
+                    settingsDiv.appendChild(row);
                 });
             }
-            moduleContainer.appendChild(moduleHeader);
-            moduleContainer.appendChild(settingsContainer);
-            self.panelBody.appendChild(moduleContainer);
-            self.headerMap.set(modItem, moduleHeader);
+
+            container.appendChild(header);
+            container.appendChild(settingsDiv);
+
+            this.panelBody.appendChild(container);
+            this.headerMap.set(mod, header);
         });
     };
 
     NTRToolBox.prototype.attachGlobalKeyBindings = function () {
-        const self = this;
-        document.addEventListener('keydown', function (e) {
+        document.addEventListener('keydown', e => {
             if (e.ctrlKey || e.altKey || e.metaKey) return;
             const pk = e.key.toLowerCase();
-            self.configuration.modules.forEach(function (m) {
-                const bSetting = m.settings.find(s => s.name === 'bind');
-                if (!bSetting || bSetting.value === 'none') return;
-                if (bSetting.value.toLowerCase() === pk) {
-                    if (!isModuleEnabledByWhitelist(m)) return;
+            this.configuration.modules.forEach(mod => {
+                const bind = mod.settings.find(s => s.name === 'bind');
+                if (!bind || bind.value === 'none') return;
+                if (bind.value.toLowerCase() === pk) {
+                    if (!isModuleEnabledByWhitelist(mod)) return;
                     e.preventDefault();
-                    self.handleModuleClick(m, null);
+                    this.handleModuleClick(mod, null);
                 }
             });
         });
     };
 
-    NTRToolBox.prototype.handleModuleClick = function (modItem, modHeader) {
-        if (!domainAllowed || !isModuleEnabledByWhitelist(modItem)) return;
+    NTRToolBox.prototype.handleModuleClick = function (mod, header) {
+        if (!domainAllowed || !isModuleEnabledByWhitelist(mod)) return;
         try {
-            if (modItem.type === 'onclick') {
-                if (modItem.run instanceof Function) {
-                    Promise.resolve(modItem.run(modItem)).catch(console.error);
+            if (mod.type === 'onclick') {
+                if (typeof mod.run === 'function') {
+                    Promise.resolve(mod.run(mod)).catch(console.error);
                 }
-            } else if (modItem.type === 'keep') {
-                const isActive = this.keepActiveSet.has(modItem.name);
-                if (isActive) {
-                    if (modHeader) this.stopKeepModule(modItem, modHeader);
+            } else if (mod.type === 'keep') {
+                const active = this.keepActiveSet.has(mod.name);
+                if (active) {
+                    if (header) this.stopKeepModule(mod, header);
                 } else {
-                    if (modHeader) this.startKeepModule(modItem, modHeader);
+                    if (header) this.startKeepModule(mod, header);
                 }
             }
-        } catch (e) {
-            console.error("Error running module:", modItem.name, e);
+        } catch (err) {
+            console.error('Error running module:', mod.name, err);
         }
     };
 
-    NTRToolBox.prototype.startKeepModule = function (modItem, modHeader) {
-        if (this.keepIntervals.has(modItem.name)) return;
-        modHeader.classList.add('active');
-        this.keepActiveSet.add(modItem.name);
-        const intId = setInterval(function () {
-            if (typeof modItem.run === 'function') {
-                modItem.run(modItem);
-            }
-        }, 2000);
-        this.keepIntervals.set(modItem.name, intId);
+    NTRToolBox.prototype.startKeepModule = function (mod, header) {
+        if (this.keepActiveSet.has(mod.name)) return;
+        header.classList.add('active');
+        this.keepActiveSet.add(mod.name);
         this.updateKeepStateStorage();
     };
 
-    NTRToolBox.prototype.stopKeepModule = function (modItem, modHeader) {
-        const intId = this.keepIntervals.get(modItem.name);
-        if (intId) {
-            clearInterval(intId);
-            this.keepIntervals.delete(modItem.name);
-        }
-        modHeader.classList.remove('active');
-        this.keepActiveSet.delete(modItem.name);
+    NTRToolBox.prototype.stopKeepModule = function (mod, header) {
+        header.classList.remove('active');
+        this.keepActiveSet.delete(mod.name);
         this.updateKeepStateStorage();
     };
 
     NTRToolBox.prototype.updateKeepStateStorage = function () {
         const st = {};
-        this.keepActiveSet.forEach(function (n) {
+        this.keepActiveSet.forEach(n => {
             st[n] = true;
         });
         localStorage.setItem('NTR_KeepState', JSON.stringify(st));
@@ -998,42 +1073,70 @@
         let saved = {};
         try {
             saved = JSON.parse(localStorage.getItem('NTR_KeepState') || '{}');
-        } catch (e) { }
-        const self = this;
-        this.configuration.modules.forEach(function (m) {
-            if (m.type === 'keep' && saved[m.name]) {
-                const hdr = self.headerMap.get(m);
+        } catch (e) {}
+        this.configuration.modules.forEach(mod => {
+            if (mod.type === 'keep' && saved[mod.name]) {
+                const hdr = this.headerMap.get(mod);
                 if (hdr) {
-                    self.startKeepModule(m, hdr);
+                    this.startKeepModule(mod, hdr);
                 }
             }
         });
     };
 
+    NTRToolBox.prototype.scheduleNextPoll = function () {
+        const now = Date.now();
+        if (now - this._lastKeepRun >= 100) {
+            this.pollKeepModules();
+            this._lastKeepRun = now;
+        }
+        if (now - this._lastVisRun >= 250) {
+            this.updateModuleVisibility();
+            this._lastVisRun = now;
+        }
+        this._pollTimer = setTimeout(() => {
+            this.scheduleNextPoll();
+        }, 10);
+    };
+
+    NTRToolBox.prototype.pollKeepModules = function () {
+        this.configuration.modules.forEach(mod => {
+            if (mod.type === 'keep' && this.keepActiveSet.has(mod.name) && typeof mod.run === 'function') {
+                mod.run(mod);
+            }
+        });
+    };
+
+    NTRToolBox.prototype.runModule = function(name) {
+        this.configuration.modules.filter(mod => mod.name == name).forEach(mod => {
+            if (typeof mod.run === 'function') {
+                mod.run(mod);
+            }
+        });
+    }
+
     NTRToolBox.prototype.updateModuleVisibility = function () {
-        const self = this;
-        this.configuration.modules.forEach(function (m) {
-            const hdr = self.headerMap.get(m);
+        this.configuration.modules.forEach(mod => {
+            const hdr = this.headerMap.get(mod);
             if (!hdr) return;
             const cont = hdr.parentElement;
-            const allow = domainAllowed && isModuleEnabledByWhitelist(m);
-            if (!allow) {
+            const allowed = domainAllowed && isModuleEnabledByWhitelist(mod);
+            if (!allowed) {
                 cont.style.display = 'none';
-                if (m.type === 'keep' && self.keepActiveSet.has(m.name)) {
-                    self.stopKeepModule(m, hdr);
+                if (mod.type === 'keep' && this.keepActiveSet.has(mod.name)) {
+                    this.stopKeepModule(mod, hdr);
                 }
             } else {
                 cont.style.display = 'block';
             }
         });
-        this.adjustPanelPosition();
     };
 
     NTRToolBox.prototype.setMinimizedState = function (newVal) {
         if (this.isMinimized === newVal) return;
-        const oldRect = this.panel.getBoundingClientRect();
-        const anchorInfo = getAnchorCornerInfo(oldRect);
-        localStorage.setItem('ntr-panel-anchor', JSON.stringify(anchorInfo));
+        const rect = this.panel.getBoundingClientRect();
+        const anchor = getAnchorCornerInfo(rect);
+
         this.isMinimized = newVal;
         if (this.isMinimized) {
             this.panel.classList.add('minimized');
@@ -1046,39 +1149,45 @@
             this.panelBody.style.display = 'block';
             this.infoBar.style.display = 'flex';
         }
-        const self = this;
-        setTimeout(function () {
-            const newRect = self.panel.getBoundingClientRect();
-            let newLeft, newTop;
-            if (anchorInfo.corner === 'top-left') {
-                newLeft = anchorInfo.x;
-                newTop = anchorInfo.y;
-            } else if (anchorInfo.corner === 'top-right') {
-                newLeft = anchorInfo.x - newRect.width;
-                newTop = anchorInfo.y;
-            } else if (anchorInfo.corner === 'bottom-left') {
-                newLeft = anchorInfo.x;
-                newTop = anchorInfo.y - newRect.height;
-            } else if (anchorInfo.corner === 'bottom-right') {
-                newLeft = anchorInfo.x - newRect.width;
-                newTop = anchorInfo.y - newRect.height;
-            } else {
-                newLeft = parseFloat(self.panel.style.left) || newRect.left;
-                newTop = parseFloat(self.panel.style.top) || newRect.top;
+
+        setTimeout(() => {
+            const newRect = this.panel.getBoundingClientRect();
+            let left, top;
+            switch (anchor.corner) {
+                case 'top-left':
+                    left = anchor.x;
+                    top = anchor.y;
+                    break;
+                case 'top-right':
+                    left = anchor.x - newRect.width;
+                    top = anchor.y;
+                    break;
+                case 'bottom-left':
+                    left = anchor.x;
+                    top = anchor.y - newRect.height;
+                    break;
+                case 'bottom-right':
+                    left = anchor.x - newRect.width;
+                    top = anchor.y - newRect.height;
+                    break;
+                default:
+                    left = parseFloat(this.panel.style.left) || newRect.left;
+                    top = parseFloat(this.panel.style.top) || newRect.top;
             }
-            newLeft = Math.min(Math.max(newLeft, 0), window.innerWidth - newRect.width);
-            newTop = Math.min(Math.max(newTop, 0), window.innerHeight - newRect.height);
-            self.panel.style.left = newLeft + 'px';
-            self.panel.style.top = newTop + 'px';
+            // clamp to viewport
+            left = Math.min(Math.max(left, 0), window.innerWidth - newRect.width);
+            top = Math.min(Math.max(top, 0), window.innerHeight - newRect.height);
+            this.panel.style.left = left + 'px';
+            this.panel.style.top = top + 'px';
             localStorage.setItem('ntr-panel-position', JSON.stringify({
-                left: self.panel.style.left,
-                top: self.panel.style.top
+                left: this.panel.style.left,
+                top: this.panel.style.top
             }));
         }, 310);
     };
 
-    const style = document.createElement('style');
-    style.textContent = `
+    const css = document.createElement('style');
+    css.textContent = `
     #ntr-panel {
         position: fixed;
         left: 20px;
@@ -1176,13 +1285,17 @@
         background: #63E2B7 !important;
         color: #fff !important;
     }
-    @media only screen and (max-width:600px){
+    @media only screen and (max-width:600px) {
         #ntr-panel {
             transform: scale(0.6);
             transform-origin: top left;
         }
     }
     `;
-    document.head.appendChild(style);
-    new NTRToolBox();
+    document.head.appendChild(css);
+
+    // -----------------------------------
+    // Start
+    // -----------------------------------
+    const script = new NTRToolBox();
 })();
