@@ -13,9 +13,10 @@
 (function () {
     'use strict';
 
-    var CONFIG_VERSION = 12;
-    var CONFIG_STORAGE_KEY = 'NTR_ToolBox_Config';
-    var domainAllowed = (location.hostname === 'books.fishhawk.top' || location.hostname === 'books1.fishhawk.top');
+    const CONFIG_VERSION = 12;
+    const CONFIG_STORAGE_KEY = 'NTR_ToolBox_Config';
+    const IS_MOBIlE = /Mobi|Android/i.test(navigator.userAgent);
+    const domainAllowed = (location.hostname === 'books.fishhawk.top' || location.hostname === 'books1.fishhawk.top');
 
     function newBooleanSetting(nameDefault, boolDefault) {
         return { name: nameDefault, type: 'boolean', value: Boolean(boolDefault) };
@@ -31,28 +32,22 @@
     }
     function getModuleSetting(moduleObj, key) {
         if (!moduleObj.settings) return;
-        var found = moduleObj.settings.find(function (x) {
-            return x.name === key;
-        });
+        const found = moduleObj.settings.find(x => x.name === key);
         return found ? found.value : undefined;
     }
-
     function isModuleEnabledByWhitelist(modItem) {
         if (!modItem.whitelist || !modItem.whitelist.trim()) return domainAllowed;
-        var parts = modItem.whitelist.split(/[,;\n]+/).map(function (s) { return s.trim(); }).filter(Boolean);
-        return domainAllowed && parts.some(function (p) {
+        const parts = modItem.whitelist.split(/[,;\n]+/).map(s => s.trim()).filter(Boolean);
+        return domainAllowed && parts.some(p => {
             if (p.endsWith('/*')) {
-                var basePath = p.slice(0, -2);
+                const basePath = p.slice(0, -2);
                 return location.pathname.startsWith(basePath + '/');
             }
             return location.pathname.indexOf(p) !== -1;
         });
     }
 
-    // ----------------------------------------------------------------
-    // Module Definitions
-    // ----------------------------------------------------------------
-    var moduleAddSakuraTranslator = {
+    const moduleAddSakuraTranslator = {
         name: '添加Sakura翻譯器',
         type: 'onclick',
         whitelist: '/workspace/sakura',
@@ -64,34 +59,34 @@
             newStringSetting('bind', 'none'),
         ],
         run: async function (configObj) {
-            var totalCount = getModuleSetting(configObj, '數量') || 1;
-            var namePrefix = getModuleSetting(configObj, '名稱') || '';
-            var linkValue = getModuleSetting(configObj, '鏈接') || '';
-            var delayValue = getModuleSetting(configObj, '延遲') || 5;
-            var delay = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
-            var currentIndex = 1;
+            const totalCount = getModuleSetting(configObj, '數量') || 1;
+            const namePrefix = getModuleSetting(configObj, '名稱') || '';
+            const linkValue = getModuleSetting(configObj, '鏈接') || '';
+            const delayValue = getModuleSetting(configObj, '延遲') || 5;
+            const delay = ms => new Promise(r => setTimeout(r, ms));
+            let currentIndex = 1;
             async function closeTab() {
-                var closeButton = document.querySelector(
+                const closeButton = document.querySelector(
                     'button[aria-label="close"].n-base-close,button.n-base-close[aria-label="close"],button.n-base-close.n-base-close--absolute.n-card-header__close'
                 );
                 if (closeButton) closeButton.click();
             }
             async function openAddTab() {
-                var addBtn = Array.from(document.querySelectorAll('button.n-button'))
-                    .find(function (btn) {
-                        var txt = (btn.querySelector('.n-button__content') || {}).textContent || '';
+                const addBtn = Array.from(document.querySelectorAll('button.n-button'))
+                    .find(btn => {
+                        const txt = (btn.querySelector('.n-button__content') || {}).textContent || '';
                         return txt.trim().indexOf('添加翻译器') !== -1;
                     });
                 if (addBtn) addBtn.click();
             }
             async function fillForm() {
-                var nameInput = document.querySelector('input.n-input__input-el[placeholder="给你的翻译器起个名字"]');
-                var linkInput = document.querySelector('input.n-input__input-el[placeholder="翻译器的链接"]');
-                var segInput = document.querySelectorAll('input.n-input__input-el[placeholder="请输入"]')[0];
-                var preInput = document.querySelectorAll('input.n-input__input-el[placeholder="请输入"]')[1];
-                var addBtn = Array.from(document.querySelectorAll('button.n-button.n-button--primary-type'))
-                    .find(function (btn) {
-                        var txt = (btn.querySelector('.n-button__content') || {}).textContent || '';
+                const nameInput = document.querySelector('input.n-input__input-el[placeholder="给你的翻译器起个名字"]');
+                const linkInput = document.querySelector('input.n-input__input-el[placeholder="翻译器的链接"]');
+                const segInput = document.querySelectorAll('input.n-input__input-el[placeholder="请输入"]')[0];
+                const preInput = document.querySelectorAll('input.n-input__input-el[placeholder="请输入"]')[1];
+                const addBtn = Array.from(document.querySelectorAll('button.n-button.n-button--primary-type'))
+                    .find(btn => {
+                        const txt = (btn.querySelector('.n-button__content') || {}).textContent || '';
                         return txt.trim().indexOf('添加') !== -1;
                     });
                 if (nameInput && linkInput && segInput && preInput && addBtn) {
@@ -117,7 +112,7 @@
         }
     };
 
-    var moduleAddGPTTranslator = {
+    const moduleAddGPTTranslator = {
         name: '添加GPT翻譯器',
         type: 'onclick',
         whitelist: '/workspace/gpt',
@@ -131,36 +126,36 @@
             newStringSetting('bind', 'none'),
         ],
         run: async function (configObj) {
-            var countVal = getModuleSetting(configObj, '數量') || 1;
-            var namePrefixVal = getModuleSetting(configObj, '名稱') || '';
-            var modelVal = getModuleSetting(configObj, '模型') || '';
-            var apiKeyVal = getModuleSetting(configObj, 'Key') || '';
-            var apiUrlVal = getModuleSetting(configObj, '鏈接') || '';
-            var delayValue = getModuleSetting(configObj, '延遲') || 5;
-            var delay = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
-            var currentIndex = 1;
+            const countVal = getModuleSetting(configObj, '數量') || 1;
+            const namePrefixVal = getModuleSetting(configObj, '名稱') || '';
+            const modelVal = getModuleSetting(configObj, '模型') || '';
+            const apiKeyVal = getModuleSetting(configObj, 'Key') || '';
+            const apiUrlVal = getModuleSetting(configObj, '鏈接') || '';
+            const delayValue = getModuleSetting(configObj, '延遲') || 5;
+            const delay = ms => new Promise(r => setTimeout(r, ms));
+            let currentIndex = 1;
             async function closeTab() {
-                var cBtn = document.querySelector(
+                const cBtn = document.querySelector(
                     'button[aria-label="close"].n-base-close,button.n-base-close[aria-label="close"],button.n-base-close.n-base-close--absolute.n-card-header__close'
                 );
                 if (cBtn) cBtn.click();
             }
             async function openAddTab() {
-                var addBtn = Array.from(document.querySelectorAll('button.n-button'))
-                    .find(function (btn) {
-                        var txt = (btn.querySelector('.n-button__content') || {}).textContent || '';
+                const addBtn = Array.from(document.querySelectorAll('button.n-button'))
+                    .find(btn => {
+                        const txt = (btn.querySelector('.n-button__content') || {}).textContent || '';
                         return txt.trim().indexOf('添加翻译器') !== -1;
                     });
                 if (addBtn) addBtn.click();
             }
             async function fillForm() {
-                var nameInput = document.querySelector('input.n-input__input-el[placeholder="给你的翻译器起个名字"]');
-                var modelInput = document.querySelector('input.n-input__input-el[placeholder="模型名称"]');
-                var urlInput = document.querySelector('input.n-input__input-el[placeholder="兼容OpenAI的API链接，默认使用deepseek"]');
-                var keyInput = document.querySelector('input.n-input__input-el[placeholder="请输入Api key"]');
-                var confirmBtn = Array.from(document.querySelectorAll('button.n-button.n-button--primary-type'))
-                    .find(function (btn) {
-                        var txt = (btn.querySelector('.n-button__content') || {}).textContent || '';
+                const nameInput = document.querySelector('input.n-input__input-el[placeholder="给你的翻译器起个名字"]');
+                const modelInput = document.querySelector('input.n-input__input-el[placeholder="模型名称"]');
+                const urlInput = document.querySelector('input.n-input__input-el[placeholder="兼容OpenAI的API链接，默认使用deepseek"]');
+                const keyInput = document.querySelector('input.n-input__input-el[placeholder="请输入Api key"]');
+                const confirmBtn = Array.from(document.querySelectorAll('button.n-button.n-button--primary-type'))
+                    .find(btn => {
+                        const txt = (btn.querySelector('.n-button__content') || {}).textContent || '';
                         return txt.trim().indexOf('添加') !== -1;
                     });
                 if (nameInput && modelInput && urlInput && keyInput && confirmBtn) {
@@ -188,7 +183,7 @@
         }
     };
 
-    var moduleDeleteTranslator = {
+    const moduleDeleteTranslator = {
         name: '刪除翻譯器',
         type: 'onclick',
         whitelist: '/workspace',
@@ -197,19 +192,19 @@
             newStringSetting('bind', 'none'),
         ],
         run: async function (configObj) {
-            var excludeStr = getModuleSetting(configObj, '排除') || '';
-            var excludeArr = excludeStr.split(',').filter(function (x) { return x; });
-            var listItems = document.querySelectorAll('.n-list-item');
-            Array.from(listItems).forEach(function (li) {
-                var titleEl = li.querySelector('.n-thing-header__title');
+            const excludeStr = getModuleSetting(configObj, '排除') || '';
+            const excludeArr = excludeStr.split(',').filter(x => x);
+            const listItems = document.querySelectorAll('.n-list-item');
+            Array.from(listItems).forEach(li => {
+                const titleEl = li.querySelector('.n-thing-header__title');
                 if (!titleEl) return;
-                var titleText = titleEl.textContent.trim();
-                var keep = excludeArr.some(function (x) { return titleText.indexOf(x) !== -1; });
+                const titleText = titleEl.textContent.trim();
+                const keep = excludeArr.some(x => titleText.indexOf(x) !== -1);
                 if (!keep) {
-                    var delBtn = li.querySelector('.n-button--error-type');
-                    var parentEl = delBtn && delBtn.parentElement;
+                    const delBtn = li.querySelector('.n-button--error-type');
+                    const parentEl = delBtn && delBtn.parentElement;
                     if (parentEl) {
-                        var siblingBtns = parentEl.querySelectorAll('button');
+                        const siblingBtns = parentEl.querySelectorAll('button');
                         if (siblingBtns.length === 5 && delBtn) delBtn.click();
                     }
                 }
@@ -217,7 +212,7 @@
         }
     };
 
-    var moduleLaunchTranslator = {
+    const moduleLaunchTranslator = {
         name: '啟動翻譯器',
         type: 'onclick',
         whitelist: '/workspace',
@@ -227,14 +222,14 @@
             newStringSetting('bind', 'none'),
         ],
         run: async function (configObj) {
-            var allBtns = document.querySelectorAll('button');
-            var intervalVal = getModuleSetting(configObj, '延遲間隔') || 50;
-            var maxClick = Math.min(getModuleSetting(configObj, '最多啟動') || 999, allBtns.length);
-            var delay = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
-            var idx = 0, clickCount = 0;
+            const allBtns = document.querySelectorAll('button');
+            const intervalVal = getModuleSetting(configObj, '延遲間隔') || 50;
+            const maxClick = Math.min(getModuleSetting(configObj, '最多啟動') || 999, allBtns.length);
+            const delay = ms => new Promise(r => setTimeout(r, ms));
+            let idx = 0, clickCount = 0;
             async function nextClick() {
                 while (idx < allBtns.length && clickCount < maxClick) {
-                    var btn = allBtns[idx];
+                    const btn = allBtns[idx];
                     idx++;
                     if (btn.textContent.indexOf('启动') !== -1 || btn.textContent.indexOf('啟動') !== -1) {
                         btn.click();
@@ -247,7 +242,7 @@
         }
     };
 
-    var moduleQueueSakura = {
+    const moduleQueueSakura = {
         name: '排隊Sakura',
         type: 'onclick',
         whitelist: '/wenku',
@@ -259,16 +254,15 @@
             newStringSetting('bind', 'none'),
         ],
         run: async function (configObj) {
-            var delay = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
-            var pollInterval = getModuleSetting(configObj, '並行延遲') || 300;
-            var concurrentLimit = getModuleSetting(configObj, '並行數量') || 5;
-            var mode = getModuleSetting(configObj, '模式');
-            var modeMap = { '常規': '常规', '過期': '过期', '重翻': '重翻' };
-            var cnMode = modeMap[mode] || '常规';
-
+            const delay = ms => new Promise(r => setTimeout(r, ms));
+            const pollInterval = getModuleSetting(configObj, '並行延遲') || 300;
+            const concurrentLimit = getModuleSetting(configObj, '並行數量') || 5;
+            const mode = getModuleSetting(configObj, '模式');
+            const modeMap = { '常規': '常规', '過期': '过期', '重翻': '重翻' };
+            const cnMode = modeMap[mode] || '常规';
             async function setMode(doc) {
-                var tags = doc.querySelectorAll('.n-tag__content');
-                for (var i = 0; i < tags.length; i++) {
+                const tags = doc.querySelectorAll('.n-tag__content');
+                for (let i = 0; i < tags.length; i++) {
                     if (tags[i].textContent.trim() === cnMode) {
                         tags[i].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
                         break;
@@ -276,10 +270,10 @@
                 }
             }
             async function clickSakuraButtons(doc) {
-                var btns = Array.from(doc.querySelectorAll('button')).filter(function (b) {
-                    return b.textContent.indexOf('排队Sakura') !== -1;
-                });
-                btns.forEach(function (btn) {
+                const btns = Array.from(doc.querySelectorAll('button')).filter(b =>
+                    b.textContent.indexOf('排队Sakura') !== -1
+                );
+                btns.forEach(btn => {
                     btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
                 });
             }
@@ -288,14 +282,14 @@
                 await clickSakuraButtons(document);
                 return;
             }
-            var domain = window.location.origin;
-            var allLinks = Array.from(document.querySelectorAll('a[href]'))
-                .map(function (a) { return a.href; })
-                .filter(function (href) { return href.startsWith(domain) && /\/wenku\/[^/]+/.test(href); });
-            var uniqueLinks = Array.from(new Set(allLinks));
+            const domain = window.location.origin;
+            const allLinks = Array.from(document.querySelectorAll('a[href]'))
+                .map(a => a.href)
+                .filter(href => href.startsWith(domain) && /\/wenku\/[^/]+/.test(href));
+            const uniqueLinks = Array.from(new Set(allLinks));
             async function waitForTabLoad(newTab) {
-                var maxWait = 10000;
-                var startTime = Date.now();
+                const maxWait = 10000;
+                const startTime = Date.now();
                 while (true) {
                     await delay(pollInterval);
                     if (!newTab || newTab.closed) {
@@ -310,7 +304,7 @@
                 }
             }
             async function processUrl(url) {
-                var newTab = window.open(url, '_blank');
+                const newTab = window.open(url, '_blank');
                 if (!newTab) {
                     throw new Error('Failed to open new tab for: ' + url);
                 }
@@ -319,10 +313,10 @@
                 await clickSakuraButtons(newTab.document);
                 newTab.close();
             }
-            var activeCount = 0, index = 0;
+            let activeCount = 0, index = 0;
             async function spawnNext() {
                 if (index >= uniqueLinks.length) return;
-                var url = uniqueLinks[index++];
+                const url = uniqueLinks[index++];
                 activeCount++;
                 try {
                     await processUrl(url);
@@ -346,7 +340,7 @@
         }
     };
 
-    var moduleQueueGPT = {
+    const moduleQueueGPT = {
         name: '排隊GPT',
         type: 'onclick',
         whitelist: '/wenku',
@@ -358,15 +352,15 @@
             newStringSetting('bind', 'none'),
         ],
         run: async function (configObj) {
-            var delay = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
-            var pollInterval = getModuleSetting(configObj, '並行延遲') || 300;
-            var concurrentLimit = getModuleSetting(configObj, '並行數量') || 5;
-            var mode = getModuleSetting(configObj, '模式');
-            var modeMap = { '常規': '常规', '過期': '过期', '重翻': '重翻' };
-            var cnMode = modeMap[mode] || '常规';
+            const delay = ms => new Promise(r => setTimeout(r, ms));
+            const pollInterval = getModuleSetting(configObj, '並行延遲') || 300;
+            const concurrentLimit = getModuleSetting(configObj, '並行數量') || 5;
+            const mode = getModuleSetting(configObj, '模式');
+            const modeMap = { '常規': '常规', '過期': '过期', '重翻': '重翻' };
+            const cnMode = modeMap[mode] || '常规';
             function setMode(doc) {
-                var tags = doc.querySelectorAll('.n-tag__content');
-                for (var i = 0; i < tags.length; i++) {
+                const tags = doc.querySelectorAll('.n-tag__content');
+                for (let i = 0; i < tags.length; i++) {
                     if (tags[i].textContent.trim() === cnMode) {
                         tags[i].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
                         break;
@@ -374,10 +368,10 @@
                 }
             }
             async function clickGPTButtons(doc) {
-                var btns = Array.from(doc.querySelectorAll('button')).filter(function (b) {
-                    return b.textContent.indexOf('排队GPT') !== -1;
-                });
-                btns.forEach(function (btn) {
+                const btns = Array.from(doc.querySelectorAll('button')).filter(b =>
+                    b.textContent.indexOf('排队GPT') !== -1
+                );
+                btns.forEach(btn => {
                     btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
                 });
             }
@@ -386,14 +380,14 @@
                 await clickGPTButtons(document);
                 return;
             }
-            var domain = window.location.origin;
-            var allLinks = Array.from(document.querySelectorAll('a[href]'))
-                .map(function (a) { return a.href; })
-                .filter(function (href) { return href.startsWith(domain) && /\/wenku\/[^/]+/.test(href); });
-            var uniqueLinks = Array.from(new Set(allLinks));
+            const domain = window.location.origin;
+            const allLinks = Array.from(document.querySelectorAll('a[href]'))
+                .map(a => a.href)
+                .filter(href => href.startsWith(domain) && /\/wenku\/[^/]+/.test(href));
+            const uniqueLinks = Array.from(new Set(allLinks));
             async function waitForTabLoad(newTab) {
-                var maxWait = 10000;
-                var startTime = Date.now();
+                const maxWait = 10000;
+                const startTime = Date.now();
                 while (true) {
                     await delay(pollInterval);
                     if (!newTab || newTab.closed) {
@@ -408,7 +402,7 @@
                 }
             }
             async function processUrl(url) {
-                var newTab = window.open(url, '_blank');
+                const newTab = window.open(url, '_blank');
                 if (!newTab) {
                     throw new Error('Failed to open new tab for: ' + url);
                 }
@@ -417,10 +411,10 @@
                 await clickGPTButtons(newTab.document);
                 newTab.close();
             }
-            var activeCount = 0, index = 0;
+            let activeCount = 0, index = 0;
             async function spawnNext() {
                 if (index >= uniqueLinks.length) return;
-                var url = uniqueLinks[index++];
+                const url = uniqueLinks[index++];
                 activeCount++;
                 try {
                     await processUrl(url);
@@ -444,7 +438,7 @@
         }
     };
 
-    var moduleAutoRetry = {
+    const moduleAutoRetry = {
         name: '自動重試',
         type: 'keep',
         whitelist: '/workspace/*',
@@ -457,29 +451,29 @@
         run: function (configObj) {
             if (!this._keepActive) {
                 this._keepActive = true;
-                var maxAttempts = getModuleSetting(configObj, '最大重試次數');
+                const maxAttempts = getModuleSetting(configObj, '最大重試次數');
                 document.addEventListener('click', function (e) {
                     if (e.target.tagName === 'BUTTON') {
                         this._attempts = 0;
                     }
                 }.bind(this));
                 this._keepIntervalId = setInterval(function () {
-                    var listItems = document.querySelectorAll('.n-list-item');
-                    var unfinishedItems = Array.from(listItems).filter(function (item) {
-                        var desc = item.querySelector('.n-thing-main__description');
+                    const listItems = document.querySelectorAll('.n-list-item');
+                    const unfinishedItems = Array.from(listItems).filter(item => {
+                        const desc = item.querySelector('.n-thing-main__description');
                         return desc && desc.textContent.indexOf('未完成') !== -1;
                     });
                     if (unfinishedItems.length > 0 && this._attempts < maxAttempts) {
-                        var hasStopButton = Array.from(document.querySelectorAll('button')).some(function (btn) {
-                            return btn.textContent === '停止';
-                        });
+                        const hasStopButton = Array.from(document.querySelectorAll('button')).some(btn =>
+                            btn.textContent === '停止'
+                        );
                         if (!hasStopButton) {
-                            var retryButtons = Array.from(document.querySelectorAll('button')).filter(function (btn) {
-                                return btn.textContent.indexOf('重试未完成任务') !== -1;
-                            });
-                            var clickCount = Math.min(unfinishedItems.length, listItems.length);
+                            const retryButtons = Array.from(document.querySelectorAll('button')).filter(btn =>
+                                btn.textContent.indexOf('重试未完成任务') !== -1
+                            );
+                            const clickCount = Math.min(unfinishedItems.length, listItems.length);
                             if (retryButtons[0]) {
-                                for (var i = 0; i < clickCount; i++) {
+                                for (let i = 0; i < clickCount; i++) {
                                     retryButtons[0].click();
                                 }
                                 this._attempts++;
@@ -497,7 +491,7 @@
         }
     };
 
-    var moduleCacheOptimization = {
+    const moduleCacheOptimization = {
         name: '緩存優化',
         type: 'keep',
         whitelist: '',
@@ -505,13 +499,13 @@
             newNumberSetting('同步間隔', 1000),
         ],
         run: async function (configObj) {
-            var interval = getModuleSetting(configObj, '同步間隔') || 1000;
-            var origSession = window.sessionStorage;
+            const interval = getModuleSetting(configObj, '同步間隔') || 1000;
+            const origSession = window.sessionStorage;
             try {
-                var proxyStorage = new Proxy(origSession, {
+                const proxyStorage = new Proxy(origSession, {
                     get: function (target, prop) {
                         if (typeof prop === 'string') {
-                            var val = target[prop];
+                            let val = target[prop];
                             if (val === undefined) {
                                 val = localStorage.getItem(prop);
                                 if (val !== null) target.setItem(prop, val);
@@ -529,10 +523,10 @@
                 Object.defineProperty(window, 'sessionStorage', { value: proxyStorage, configurable: true });
             } catch (e) { }
             setInterval(function () {
-                for (var i = 0; i < localStorage.length; i++) {
-                    var key = localStorage.key(i);
-                    var localVal = localStorage.getItem(key);
-                    var sessVal = origSession[key];
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    const localVal = localStorage.getItem(key);
+                    const sessVal = origSession[key];
                     if (sessVal !== localVal) {
                         origSession[key] = localVal;
                         try {
@@ -548,7 +542,7 @@
         }
     };
 
-    var defaultModules = [
+    const defaultModules = [
         moduleAddSakuraTranslator,
         moduleAddGPTTranslator,
         moduleDeleteTranslator,
@@ -559,9 +553,6 @@
         moduleCacheOptimization
     ];
 
-    // ----------------------------------------------------------------
-    // DragHandler - "oldest normal drag effect" (no bounding in mousemove)
-    // ----------------------------------------------------------------
     function DragHandler(panel, title) {
         this.panel = panel;
         this.title = title;
@@ -571,11 +562,10 @@
         this.init();
     }
     DragHandler.prototype.init = function () {
-        var self = this;
+        const self = this;
         this.title.addEventListener('mousedown', function (e) {
             if (e.button !== 0) return;
             self.panel.style.transition = 'width 0.3s ease';
-
             self.dragging = true;
             self.offsetX = e.clientX - self.panel.offsetLeft;
             self.offsetY = e.clientY - self.panel.offsetTop;
@@ -587,7 +577,7 @@
             const newTop = e.clientY - self.offsetY;
             self.panel.style.left = newLeft + 'px';
             self.panel.style.top = newTop + 'px';
-            clampPanelPosition();
+            clampPanel();
         });
         document.addEventListener('mouseup', function (e) {
             if (!self.dragging) return;
@@ -598,8 +588,7 @@
                 top: self.panel.style.top
             }));
         });
-
-        function clampPanelPosition() {
+        function clampPanel() {
             const rect = self.panel.getBoundingClientRect();
             let left = parseFloat(self.panel.style.left) || 0;
             let top = parseFloat(self.panel.style.top) || 0;
@@ -614,9 +603,46 @@
         }
     };
 
-    // ----------------------------------------------------------------
-    // Main Toolbox "Class"
-    // ----------------------------------------------------------------
+    function getAnchorCornerInfo(rect) {
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        const horizontal = centerX < window.innerWidth / 2 ? 'left' : 'right';
+        const vertical = centerY < window.innerHeight / 2 ? 'top' : 'bottom';
+        return { corner: vertical + '-' + horizontal, x: horizontal === 'left' ? rect.left : rect.right, y: vertical === 'top' ? rect.top : rect.bottom };
+    }
+
+    NTRToolBox.prototype.adjustPanelPosition = function () {
+        const rect = this.panel.getBoundingClientRect();
+        let anchor = null;
+        try {
+            anchor = JSON.parse(localStorage.getItem('ntr-panel-anchor'));
+        } catch (e) {}
+        let newLeft, newTop;
+        if (anchor && anchor.corner) {
+            if (anchor.corner === 'top-left') {
+                newLeft = anchor.x;
+                newTop = anchor.y;
+            } else if (anchor.corner === 'top-right') {
+                newLeft = anchor.x - rect.width;
+                newTop = anchor.y;
+            } else if (anchor.corner === 'bottom-left') {
+                newLeft = anchor.x;
+                newTop = anchor.y - rect.height;
+            } else if (anchor.corner === 'bottom-right') {
+                newLeft = anchor.x - rect.width;
+                newTop = anchor.y - rect.height;
+            }
+        } else {
+            newLeft = rect.left;
+            newTop = rect.top;
+        }
+        newLeft = Math.min(Math.max(newLeft, 0), window.innerWidth - rect.width);
+        newTop = Math.min(Math.max(newTop, 0), window.innerHeight - rect.height);
+        this.panel.style.left = newLeft + 'px';
+        this.panel.style.top = newTop + 'px';
+        localStorage.setItem('ntr-panel-position', JSON.stringify({ left: this.panel.style.left, top: this.panel.style.top }));
+    };
+
     function NTRToolBox() {
         this.configuration = this.loadConfiguration();
         this.keepIntervals = new Map();
@@ -625,25 +651,32 @@
         this.buildGUI();
         this.attachGlobalKeyBindings();
         this.loadKeepStateAndStart();
-        var self = this;
+        const self = this;
         setInterval(function () {
             self.updateModuleVisibility();
         }, 500);
     }
 
+    function cloneDefaultModules() {
+        return defaultModules.map(m => ({
+            ...m,
+            settings: m.settings ? m.settings.map(s => ({ ...s })) : []
+        }));
+    }
+    
     NTRToolBox.prototype.loadConfiguration = function () {
-        var tempStorage;
+        let tempStorage;
         try {
             tempStorage = JSON.parse(localStorage.getItem(CONFIG_STORAGE_KEY));
         } catch (e) { }
         if (!tempStorage || tempStorage.version !== CONFIG_VERSION) {
-            return { version: CONFIG_VERSION, modules: JSON.parse(JSON.stringify(defaultModules)) };
+            return { version: CONFIG_VERSION, modules: cloneDefaultModules() };
         }
-        var loadedModules = JSON.parse(JSON.stringify(defaultModules));
+        const loadedModules = cloneDefaultModules();
         tempStorage.modules.forEach(function (storedModule) {
-            var defMod = loadedModules.find(function (m) { return m.name === storedModule.name; });
+            const defMod = loadedModules.find(m => m.name === storedModule.name);
             if (defMod) {
-                for (var k in storedModule) {
+                for (const k in storedModule) {
                     if (defMod.hasOwnProperty(k) && typeof defMod[k] === typeof storedModule[k] && storedModule[k] !== undefined) {
                         defMod[k] = storedModule[k];
                     }
@@ -651,20 +684,22 @@
             }
         });
         if (loadedModules.length !== defaultModules.length) {
-            loadedModules = JSON.parse(JSON.stringify(defaultModules));
-            localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify({ version: CONFIG_VERSION, modules: loadedModules }));
+            const fresh = cloneDefaultModules();
+            localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify({ version: CONFIG_VERSION, modules: fresh }));
+            return { version: CONFIG_VERSION, modules: fresh };
         } else {
-            var defNames = defaultModules.map(function (x) { return x.name; }).sort().join(',');
-            var storedNames = loadedModules.map(function (x) { return x.name; }).sort().join(',');
+            const defNames = defaultModules.map(x => x.name).sort().join(',');
+            const storedNames = loadedModules.map(x => x.name).sort().join(',');
             if (defNames !== storedNames) {
-                loadedModules = JSON.parse(JSON.stringify(defaultModules));
-                localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify({ version: CONFIG_VERSION, modules: loadedModules }));
+                const fresh = cloneDefaultModules();
+                localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify({ version: CONFIG_VERSION, modules: fresh }));
+                return { version: CONFIG_VERSION, modules: fresh };
             }
         }
         loadedModules.forEach(function (m) {
-            var found = defaultModules.find(function (d) { return d.name === m.name; });
+            const found = defaultModules.find(d => d.name === m.name);
             if (found && typeof found.run === 'function') {
-                for (var p in found) {
+                for (const p in found) {
                     if (!m.hasOwnProperty(p)) {
                         m[p] = found[p];
                     }
@@ -674,16 +709,18 @@
         });
         return { version: CONFIG_VERSION, modules: loadedModules };
     };
+
     NTRToolBox.prototype.saveConfiguration = function () {
         localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(this.configuration));
     };
+
     NTRToolBox.prototype.buildGUI = function () {
         this.panel = document.createElement('div');
         this.panel.id = 'ntr-panel';
-        var savedPos = localStorage.getItem('ntr-panel-position');
+        const savedPos = localStorage.getItem('ntr-panel-position');
         if (savedPos) {
             try {
-                var parsed = JSON.parse(savedPos);
+                const parsed = JSON.parse(savedPos);
                 if (parsed.left && parsed.top) {
                     this.panel.style.left = parsed.left;
                     this.panel.style.top = parsed.top;
@@ -699,16 +736,14 @@
         this.toggleSpan.textContent = '[-]';
         this.titleBar.appendChild(this.toggleSpan);
         this.panel.appendChild(this.titleBar);
-
         this.panelBody = document.createElement('div');
         this.panelBody.className = 'ntr-panel-body';
         this.panel.appendChild(this.panelBody);
-
         this.infoBar = document.createElement('div');
         this.infoBar.className = 'ntr-info';
-        var leftInfo = document.createElement('span');
-        var rightInfo = document.createElement('span');
-        if (/Mobi|Android/i.test(navigator.userAgent)) {
+        const leftInfo = document.createElement('span');
+        const rightInfo = document.createElement('span');
+        if (IS_MOBIlE) {
             leftInfo.textContent = '單擊執行 | ⚙️設定';
         } else {
             leftInfo.textContent = '左鍵執行/切換 | 右鍵設定';
@@ -718,25 +753,22 @@
         this.infoBar.appendChild(rightInfo);
         this.panel.appendChild(this.infoBar);
         document.body.appendChild(this.panel);
-
         this.dragHandler = new DragHandler(this.panel, this.titleBar);
         this.buildModules();
-        this.expandedWidth = 320;
-        this.minimizedWidth = 200;
-        var self = this;
+        const self = this;
         setTimeout(function () {
+            self.expandedWidth = self.panel.offsetWidth;
             self.expandedHeight = self.panel.offsetHeight;
-
-            var wasMin = self.isMinimized;
+            const wasMin = self.isMinimized;
             if (!wasMin) self.panel.classList.add('minimized');
-            var h0 = self.panel.offsetHeight;
+            const h0 = self.panel.offsetHeight;
             if (!wasMin) self.panel.classList.remove('minimized');
+            self.minimizedWidth = self.panel.offsetWidth;
             self.minimizedHeight = h0;
-        }, 10);
-
-        // Toggle
-        var selfRef = this;
-        if (/Mobi|Android/i.test(navigator.userAgent)) {
+            self.adjustPanelPosition();
+        }, 150);
+        const selfRef = this;
+        if (IS_MOBIlE) {
             this.titleBar.addEventListener('click', function (e) {
                 if (!selfRef.dragHandler.dragging) {
                     e.preventDefault();
@@ -750,42 +782,39 @@
             });
         }
     };
+
     NTRToolBox.prototype.buildModules = function () {
-        var self = this;
         this.panelBody.innerHTML = '';
         this.headerMap = new Map();
+        const self = this;
         this.configuration.modules.forEach(function (modItem) {
-            var moduleContainer = document.createElement('div');
+            const moduleContainer = document.createElement('div');
             moduleContainer.className = 'ntr-module-container';
-            var moduleHeader = document.createElement('div');
+            const moduleHeader = document.createElement('div');
             moduleHeader.className = 'ntr-module-header';
-            var nameSpan = document.createElement('span');
+            const nameSpan = document.createElement('span');
             nameSpan.textContent = modItem.name;
             moduleHeader.appendChild(nameSpan);
-
-            if (!/Mobi|Android/i.test(navigator.userAgent)) {
-                var iconSpan = document.createElement('span');
+            if (!IS_MOBIlE) {
+                const iconSpan = document.createElement('span');
                 iconSpan.textContent = (modItem.type === 'keep' ? '⇋' : '▶');
                 iconSpan.style.marginLeft = '8px';
                 moduleHeader.appendChild(iconSpan);
             }
-
-            var settingsContainer = document.createElement('div');
+            const settingsContainer = document.createElement('div');
             settingsContainer.className = 'ntr-settings-container';
             settingsContainer.style.display = 'none';
-
-            if (/Mobi|Android/i.test(navigator.userAgent)) {
-                var settingsBtn = document.createElement('button');
+            if (IS_MOBIlE) {
+                const settingsBtn = document.createElement('button');
                 settingsBtn.textContent = '⚙️';
                 settingsBtn.style.color = 'white';
                 settingsBtn.style.float = 'right';
                 settingsBtn.onclick = function (e) {
                     e.stopPropagation();
-                    var curDisp = settingsContainer.style.display || window.getComputedStyle(settingsContainer).display;
+                    const curDisp = settingsContainer.style.display || window.getComputedStyle(settingsContainer).display;
                     settingsContainer.style.display = (curDisp === 'none' ? 'block' : 'none');
                 };
                 moduleHeader.appendChild(settingsBtn);
-
                 moduleHeader.onclick = function (e) {
                     if (e.target.classList.contains('ntr-bind-button') || e.target === settingsBtn) return;
                     self.handleModuleClick(modItem, moduleHeader);
@@ -793,7 +822,7 @@
             } else {
                 moduleHeader.oncontextmenu = function (e) {
                     e.preventDefault();
-                    var curDisp = settingsContainer.style.display || window.getComputedStyle(settingsContainer).display;
+                    const curDisp = settingsContainer.style.display || window.getComputedStyle(settingsContainer).display;
                     settingsContainer.style.display = (curDisp === 'none' ? 'block' : 'none');
                 };
                 moduleHeader.onclick = function (e) {
@@ -803,19 +832,17 @@
                     }
                 };
             }
-
             if (Array.isArray(modItem.settings)) {
                 modItem.settings.forEach(function (sObj) {
-                    var row = document.createElement('div');
+                    const row = document.createElement('div');
                     row.style.marginBottom = '8px';
-                    var label = document.createElement('label');
+                    const label = document.createElement('label');
                     label.style.display = 'inline-block';
                     label.style.minWidth = '70px';
                     label.style.color = '#ccc';
                     label.textContent = sObj.name + ': ';
                     row.appendChild(label);
-
-                    var inputEl;
+                    let inputEl;
                     if (sObj.type === 'boolean') {
                         inputEl = document.createElement('input');
                         inputEl.type = 'checkbox';
@@ -849,7 +876,7 @@
                                     e2.stopPropagation();
                                     return;
                                 }
-                                var pk = e2.key.toLowerCase();
+                                const pk = e2.key.toLowerCase();
                                 sObj.value = pk;
                                 inputEl.textContent = '[' + pk.toUpperCase() + ']';
                                 self.saveConfiguration();
@@ -861,7 +888,7 @@
                     } else if (sObj.type === 'select' && Array.isArray(sObj.options)) {
                         inputEl = document.createElement('select');
                         sObj.options.forEach(function (opt) {
-                            var optEl = document.createElement('option');
+                            const optEl = document.createElement('option');
                             optEl.value = opt;
                             optEl.textContent = opt;
                             if (opt === sObj.value) {
@@ -891,20 +918,20 @@
                     settingsContainer.appendChild(row);
                 });
             }
-
             moduleContainer.appendChild(moduleHeader);
             moduleContainer.appendChild(settingsContainer);
             self.panelBody.appendChild(moduleContainer);
             self.headerMap.set(modItem, moduleHeader);
         });
     };
+
     NTRToolBox.prototype.attachGlobalKeyBindings = function () {
-        var self = this;
+        const self = this;
         document.addEventListener('keydown', function (e) {
             if (e.ctrlKey || e.altKey || e.metaKey) return;
-            var pk = e.key.toLowerCase();
+            const pk = e.key.toLowerCase();
             self.configuration.modules.forEach(function (m) {
-                var bSetting = m.settings.find(function (s) { return s.name === 'bind'; });
+                const bSetting = m.settings.find(s => s.name === 'bind');
                 if (!bSetting || bSetting.value === 'none') return;
                 if (bSetting.value.toLowerCase() === pk) {
                     if (!isModuleEnabledByWhitelist(m)) return;
@@ -914,27 +941,32 @@
             });
         });
     };
+
     NTRToolBox.prototype.handleModuleClick = function (modItem, modHeader) {
         if (!domainAllowed || !isModuleEnabledByWhitelist(modItem)) return;
-        if (modItem.type === 'onclick') {
-            if (typeof modItem.run === 'function') {
-                modItem.run(modItem);
+        try {
+            if (modItem.type === 'onclick') {
+                if (modItem.run instanceof Function) {
+                    Promise.resolve(modItem.run(modItem)).catch(console.error);
+                }
+            } else if (modItem.type === 'keep') {
+                const isActive = this.keepActiveSet.has(modItem.name);
+                if (isActive) {
+                    if (modHeader) this.stopKeepModule(modItem, modHeader);
+                } else {
+                    if (modHeader) this.startKeepModule(modItem, modHeader);
+                }
             }
-        } else if (modItem.type === 'keep') {
-            var isActive = this.keepActiveSet.has(modItem.name);
-            if (isActive) {
-                if (modHeader) this.stopKeepModule(modItem, modHeader);
-            } else {
-                if (modHeader) this.startKeepModule(modItem, modHeader);
-            }
+        } catch (e) {
+            console.error("Error running module:", modItem.name, e);
         }
     };
+
     NTRToolBox.prototype.startKeepModule = function (modItem, modHeader) {
         if (this.keepIntervals.has(modItem.name)) return;
         modHeader.classList.add('active');
         this.keepActiveSet.add(modItem.name);
-        var self = this;
-        var intId = setInterval(function () {
+        const intId = setInterval(function () {
             if (typeof modItem.run === 'function') {
                 modItem.run(modItem);
             }
@@ -942,8 +974,9 @@
         this.keepIntervals.set(modItem.name, intId);
         this.updateKeepStateStorage();
     };
+
     NTRToolBox.prototype.stopKeepModule = function (modItem, modHeader) {
-        var intId = this.keepIntervals.get(modItem.name);
+        const intId = this.keepIntervals.get(modItem.name);
         if (intId) {
             clearInterval(intId);
             this.keepIntervals.delete(modItem.name);
@@ -952,35 +985,38 @@
         this.keepActiveSet.delete(modItem.name);
         this.updateKeepStateStorage();
     };
+
     NTRToolBox.prototype.updateKeepStateStorage = function () {
-        var st = {};
+        const st = {};
         this.keepActiveSet.forEach(function (n) {
             st[n] = true;
         });
         localStorage.setItem('NTR_KeepState', JSON.stringify(st));
     };
+
     NTRToolBox.prototype.loadKeepStateAndStart = function () {
-        var saved = {};
+        let saved = {};
         try {
             saved = JSON.parse(localStorage.getItem('NTR_KeepState') || '{}');
         } catch (e) { }
-        var self = this;
+        const self = this;
         this.configuration.modules.forEach(function (m) {
             if (m.type === 'keep' && saved[m.name]) {
-                var hdr = self.headerMap.get(m);
+                const hdr = self.headerMap.get(m);
                 if (hdr) {
                     self.startKeepModule(m, hdr);
                 }
             }
         });
     };
+
     NTRToolBox.prototype.updateModuleVisibility = function () {
-        var self = this;
+        const self = this;
         this.configuration.modules.forEach(function (m) {
-            var hdr = self.headerMap.get(m);
+            const hdr = self.headerMap.get(m);
             if (!hdr) return;
-            var cont = hdr.parentElement;
-            var allow = domainAllowed && isModuleEnabledByWhitelist(m);
+            const cont = hdr.parentElement;
+            const allow = domainAllowed && isModuleEnabledByWhitelist(m);
             if (!allow) {
                 cont.style.display = 'none';
                 if (m.type === 'keep' && self.keepActiveSet.has(m.name)) {
@@ -990,37 +1026,15 @@
                 cont.style.display = 'block';
             }
         });
+        this.adjustPanelPosition();
     };
 
-    // ----------------------------------------------------------------
-    // Corner Anchor Logic for Expand/Minimize
-    // ----------------------------------------------------------------
-    // We'll detect which corner the panel is closest to
-    function getAnchorCorner(panelRect) {
-        var panelCenterX = panelRect.left + panelRect.width / 2;
-        var panelCenterY = panelRect.top + panelRect.height / 2;
-        var screenCenterX = window.innerWidth / 2;
-        var screenCenterY = window.innerHeight / 2;
-        var anchorX = (panelCenterX < screenCenterX) ? 'left' : 'right';
-        var anchorY = (panelCenterY < screenCenterY) ? 'top' : 'bottom';
-        return anchorY + '-' + anchorX;
-    }
-
-    // We'll do the math for shifting based on anchor corner
     NTRToolBox.prototype.setMinimizedState = function (newVal) {
-        var wasMinimized = this.isMinimized;
-        if (wasMinimized === newVal) return;
+        if (this.isMinimized === newVal) return;
+        const oldRect = this.panel.getBoundingClientRect();
+        const anchorInfo = getAnchorCornerInfo(oldRect);
+        localStorage.setItem('ntr-panel-anchor', JSON.stringify(anchorInfo));
         this.isMinimized = newVal;
-
-        // measure current rect
-        var rect = this.panel.getBoundingClientRect();
-        var anchorCorner = getAnchorCorner(rect);
-
-        // we rely on the difference in width/height
-        var wDiff = this.expandedWidth - this.minimizedWidth;
-        var hDiff = this.expandedHeight - this.minimizedHeight;
-
-        // We do the toggle now
         if (this.isMinimized) {
             this.panel.classList.add('minimized');
             this.toggleSpan.textContent = '[+]';
@@ -1032,45 +1046,38 @@
             this.panelBody.style.display = 'block';
             this.infoBar.style.display = 'flex';
         }
-
-        // After the CSS transition
-        var self = this;
+        const self = this;
         setTimeout(function () {
-            // measure final rect again
-            var finalRect = self.panel.getBoundingClientRect();
-            // We'll adjust top/left so that the anchor corner remains in place
-
-            var leftVal = parseFloat(self.panel.style.left) || finalRect.left;
-            var topVal = parseFloat(self.panel.style.top) || finalRect.top;
-
-            // If going from expanded->minimized => sign = -1
-            // If going from minimized->expanded => sign = +1
-            var sign = (self.isMinimized ? -1 : +1);
-
-            // We'll shift the panel in the opposite direction for the anchor corner
-            // so that corner remains the same
-            if (anchorCorner.indexOf('right') !== -1) {
-                leftVal -= sign * wDiff;
+            const newRect = self.panel.getBoundingClientRect();
+            let newLeft, newTop;
+            if (anchorInfo.corner === 'top-left') {
+                newLeft = anchorInfo.x;
+                newTop = anchorInfo.y;
+            } else if (anchorInfo.corner === 'top-right') {
+                newLeft = anchorInfo.x - newRect.width;
+                newTop = anchorInfo.y;
+            } else if (anchorInfo.corner === 'bottom-left') {
+                newLeft = anchorInfo.x;
+                newTop = anchorInfo.y - newRect.height;
+            } else if (anchorInfo.corner === 'bottom-right') {
+                newLeft = anchorInfo.x - newRect.width;
+                newTop = anchorInfo.y - newRect.height;
+            } else {
+                newLeft = parseFloat(self.panel.style.left) || newRect.left;
+                newTop = parseFloat(self.panel.style.top) || newRect.top;
             }
-            if (anchorCorner.indexOf('bottom') !== -1) {
-                topVal -= sign * hDiff;
-            }
-
-            self.panel.style.left = leftVal + 'px';
-            self.panel.style.top = topVal + 'px';
-
-            // Save position
+            newLeft = Math.min(Math.max(newLeft, 0), window.innerWidth - newRect.width);
+            newTop = Math.min(Math.max(newTop, 0), window.innerHeight - newRect.height);
+            self.panel.style.left = newLeft + 'px';
+            self.panel.style.top = newTop + 'px';
             localStorage.setItem('ntr-panel-position', JSON.stringify({
                 left: self.panel.style.left,
                 top: self.panel.style.top
             }));
-        }, 310); // slightly after the transition
+        }, 310);
     };
 
-    // ----------------------------------------------------------------
-    // Inject CSS
-    // ----------------------------------------------------------------
-    var style = document.createElement('style');
+    const style = document.createElement('style');
     style.textContent = `
     #ntr-panel {
         position: fixed;
@@ -1177,9 +1184,5 @@
     }
     `;
     document.head.appendChild(style);
-
-    // ----------------------------------------------------------------
-    // Init
-    // ----------------------------------------------------------------
     new NTRToolBox();
 })();
