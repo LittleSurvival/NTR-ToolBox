@@ -591,7 +591,7 @@
         });
         document.addEventListener('mouseup', function (e) {
             if (!self.dragging) return;
-            self.panel.style.transition = 'width 0.3s ease, top 0.3s ease, left 0.3s ease';
+            self.panel.style.transition = 'width 0.3s ease, height 0.3s ease, top 0.3s ease, left 0.3s ease';
             self.dragging = false;
             localStorage.setItem('ntr-panel-position', JSON.stringify({
                 left: self.panel.style.left,
@@ -1085,7 +1085,7 @@
         width: 320px;
         box-shadow: 2px 2px 12px rgba(0,0,0,0.5);
         border: 1px solid #333;
-        transition: width 0.3s ease, top 0.3s ease, left 0.3s ease;
+        transition: width 0.3s ease, height 0.3s ease, top 0.3s ease, left 0.3s ease;
     }
     #ntr-panel.minimized {
         width: 200px;
