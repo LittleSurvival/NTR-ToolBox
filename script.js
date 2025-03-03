@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         NTR ToolBox
 // @namespace    http://tampermonkey.net/
-// @version      v0.3.4-20250225
+// @version      v0.4.3
+// @author       TheNano
 // @description  ToolBox for Novel Translate bot website
 // @match        https://books.fishhawk.top/*
 // @match        https://books1.fishhawk.top/*
+// @icon         https://github.com/LittleSurvival/NTR-ToolBox/blob/main/icon.jpg?raw=true
 // @grant        GM_openInTab
 // @license      All Rights Reserved
 // ==/UserScript==
@@ -18,8 +20,8 @@
 
     window._NTRToolBoxInstance = true;
 
-    const CONFIG_VERSION = 15;
-    const VERSION = '0.3.4';
+    const CONFIG_VERSION = 17;
+    const VERSION = 'v0.4.3';
     const CONFIG_STORAGE_KEY = 'NTR_ToolBox_Config';
     const IS_MOBILE = /Mobi|Android/i.test(navigator.userAgent);
     const domainAllowed = (location.hostname === 'books.fishhawk.top' || location.hostname === 'books1.fishhawk.top');
@@ -46,16 +48,17 @@
         return found ? found.value : undefined;
     }
     function isModuleEnabledByWhitelist(modItem) {
-        if (!modItem.whitelist || !modItem.whitelist.trim()) {
+        if (!modItem.whitelist) {
             return domainAllowed;
         }
-        const parts = modItem.whitelist.split(/[,;\n]+/).map(s => s.trim()).filter(Boolean);
+        const whitelist = modItem.whitelist;
+        const parts = Array.isArray(whitelist) ? whitelist : [whitelist];
         return domainAllowed && parts.some(p => {
-            if (p.endsWith('/*')) {
+            if (typeof p === 'string' && p.endsWith('/*')) {
                 const base = p.slice(0, -2);
                 return location.pathname.startsWith(base + '/');
             }
-            return location.pathname.includes(p);
+            return typeof p === 'string' && location.pathname.includes(p);
         });
     }
 
@@ -132,13 +135,22 @@
             newNumberSetting('延遲間隔', 50),
             newNumberSetting('最多啟動', 999),
             newBooleanSetting('避免無效啟動', true),
+            newStringSetting('排除', '本机,AutoDL'),
             newStringSetting('bind', 'none'),
         ],
-        run: async function (cfg) {
+        run: async function (cfg, auto) {
             const intervalVal = getModuleSetting(cfg, '延遲間隔') || 50;
             const maxClick = getModuleSetting(cfg, '最多啟動') || 999;
             const noEmptyLaunch = getModuleSetting(cfg, '避免無效啟動');
-            const allBtns = document.querySelectorAll('button');
+            const allBtns = [...document.querySelectorAll('button')].filter(btn => {
+                if (!auto && noEmptyLaunch) return true;
+                const listItem = btn.closest('.n-list-item');
+                if (listItem) {
+                    const errorMessages = listItem.querySelectorAll('div');
+                    return !Array.from(errorMessages).some(div => div.textContent.includes("TypeError: Failed to fetch"));
+                }
+                return true;
+            });
             const delay = ms => new Promise(r => setTimeout(r, ms));
             let idx = 0, clickCount = 0, lastRunning = 0, emptyCheck = 0;
 
@@ -161,222 +173,256 @@
         }
     };
 
-    const moduleQueueSakura = {
-        name: '批量排隊Sakura',
+    const moduleQueueSakuraV2 = {
+        name: '排隊Sakura v2',
         type: 'onclick',
-        whitelist: '/wenku',
+        whitelist: ['/wenku', '/novel'],
+        progress: { percentage: 0, info: '' },
         settings: [
+            newNumberSetting('單次擷取web數量(可破限)', 20),
+            newNumberSetting('擷取單頁wenku數量(deving)', 20),
             newSelectSetting('模式', ['常規', '過期', '重翻'], '常規'),
-            newNumberSetting('延遲間隔', 50),
-            newNumberSetting('並行延遲', 1000),
-            newNumberSetting('並行數量', 5),
+            newSelectSetting('分段', ['智能', '固定'], '智能'),
+            newNumberSetting('智能均分任務上限', 1000),
+            newNumberSetting('智能均分章節下限', 5),
+            newNumberSetting('固定均分任務', 6),
+            newBooleanSetting('R18(需登入)', true),
             newStringSetting('bind', 'none'),
         ],
         run: async function (cfg) {
-            const delay = ms => new Promise(r => setTimeout(r, ms));
-            const pollInterval = getModuleSetting(cfg, '並行延遲') || 300;
-            const concurrentLimit = getModuleSetting(cfg, '並行數量') || 5;
-            const mode = getModuleSetting(cfg, '模式');
+            const webCatchLimit = getModuleSetting(cfg, '單次擷取web數量(可破限)') || 20;
+            const wenkuCatchLimit = getModuleSetting(cfg, '擷取單頁wenku數量(deving)') || 20;
+            const pair = getModuleSetting(cfg, '固定均分任務') || 6;
+            const smartJobLimit = getModuleSetting(cfg, '智能均分任務上限') || 1000;
+            const smartChapterLimit = getModuleSetting(cfg, '智能均分章節下限') || 5;
+            const type = TaskUtils.getTypeString(window.location.pathname);
+            const mode = getModuleSetting(cfg, '模式') || '常規';
+            const sepMode = getModuleSetting(cfg, '分段') || '智能';
+            const r18Bypass = getModuleSetting(cfg, 'R18(需登入)');
+
+            let results = [];
+            let errorFlag = false;
+            const maxRetries = 3;
+
             const modeMap = { '常規': '常规', '過期': '过期', '重翻': '重翻' };
             const cnMode = modeMap[mode] || '常规';
 
-            async function setMode(doc) {
-                const tags = doc.querySelectorAll('.n-tag__content');
-                for (let i = 0; i < tags.length; i++) {
-                    if (tags[i].textContent.trim() === cnMode) {
-                        tags[i].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-                        break;
-                    }
-                }
-            }
-            async function clickSakuraButtons(doc) {
-                const btns = [...doc.querySelectorAll('button')].filter(b =>
-                    b.textContent.includes('排队Sakura')
-                );
-                btns.forEach(btn => {
-                    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-                });
-            }
+            switch (type) {
+                case 'wenkus': {
+                    const wenkuIds = TaskUtils.wenkuIds();
+                    const apiEndpoint = `/api/wenku/`;
 
-            if (location.pathname !== '/wenku') {
-                // direct run
-                setMode(document);
-                await clickSakuraButtons(document);
-                return;
-            }
-            const domain = window.location.origin;
-            const allLinks = [...document.querySelectorAll('a[href]')]
-                .map(a => a.href)
-                .filter(href => href.startsWith(domain) && /\/wenku\/[^/]+/.test(href));
-            const uniqueLinks = [...new Set(allLinks)];
+                    await Promise.all(
+                        wenkuIds.map(async (id) => {
+                            let attempts = 0;
+                            let success = false;
 
-            async function waitForTabLoad(tab) {
-                const maxWait = 10000;
-                const startTime = Date.now();
-                while (true) {
-                    await delay(pollInterval);
-                    if (!tab || tab.closed) {
-                        throw new Error('New tab was closed or blocked before loading.');
-                    }
-                    if (
-                        tab.document &&
-                        (tab.document.readyState === 'complete' || tab.document.querySelector('.n-tag__content'))
-                    ) {
-                        break;
-                    }
-                    if (Date.now() - startTime > maxWait) {
-                        throw new Error('Timed out waiting for new tab to load.');
-                    }
-                }
-            }
-            async function processUrl(url) {
-                const newTab = window.open(url, '_blank');
-                if (!newTab) {
-                    throw new Error('Failed to open new tab for: ' + url);
-                }
-                await waitForTabLoad(newTab);
-                await setMode(newTab.document);
-                await clickSakuraButtons(newTab.document);
-                newTab.close();
-            }
+                            while (attempts < maxRetries && !success) {
+                                try {
+                                    const response = await script.fetch(`${window.location.origin}${apiEndpoint}${id}`, r18Bypass);
+                                    if (!response.ok) throw new Error('Network response was not ok');
+                                    const data = await response.json();
+                                    const volumeIds = data.volumeJp.map(volume => volume.volumeId);
 
-            let activeCount = 0, index = 0;
-            async function spawnNext() {
-                if (index >= uniqueLinks.length) return;
-                const url = uniqueLinks[index++];
-                activeCount++;
-                try {
-                    await processUrl(url);
-                } catch (err) {
-                    console.error('Failed to process:', url, err);
-                } finally {
-                    activeCount--;
+                                    volumeIds.forEach(name => results.push({ task: TaskUtils.wenkuLinkBuilder(id, name, SettingUtils.getTranslateMode(mode)), description: name }))
+                                    success = true;
+                                } catch (error) {
+                                    NotificationUtils.showError(`Failed to fetch data for ID ${id}, attempt ${attempts + 1}.`);
+                                    attempts++;
+                                    if (attempts < maxRetries) {
+                                        await new Promise(resolve => setTimeout(resolve, 1000));
+                                    }
+                                }
+                            }
+                        })
+                    );
+                    await StorageUtils.addJobs(StorageUtils.sakura, results);
+                    break;
+                };
+                case 'wenku': {
+                    await TaskUtils.clickButtons(cnMode);
+                    await TaskUtils.clickButtons('排队Sakura');
+                    break;
                 }
-            }
-            while (index < uniqueLinks.length) {
-                if (activeCount < concurrentLimit) {
-                    spawnNext();
-                } else {
-                    await delay(50);
+                case 'novels': {
+                    const apiUrl = TaskUtils.webSearchApi(webCatchLimit);
+                    try {
+                        const response = await script.fetch(`${window.location.origin}${apiUrl}`, r18Bypass);
+                        if (!response.ok) throw new Error('Network response was not ok');
+                        const data = await response.json();
+                        const novels = data.items.map(item => {
+                            const title = item.titleZh ?? item.titleJp;
+                            return {
+                                url: `/${item.providerId}/${item.novelId}`,
+                                description: title,
+                                total: item.total,
+                                sakura: item.sakura
+                            };
+                        });
+                        results = sepMode == '智能'
+                            ? await TaskUtils.assignTasksSmart(novels, smartJobLimit, smartChapterLimit, SettingUtils.getTranslateMode(mode))
+                            : await TaskUtils.assignTasksStatic(novels, pair, SettingUtils.getTranslateMode(mode));
+
+                        await StorageUtils.addJobs(StorageUtils.sakura, results);
+                    } catch (error) {
+                        errorFlag = true;
+                        NotificationUtils.showError(`Failed to fetch data for ID ${id}, attempt ${attempts + 1}.`)
+                    }
+                    break;
                 }
+                case 'novel': {
+                    try {
+                        const targetSpan = Array.from(document.querySelectorAll('span.n-text')).find(span => /总计 (\d+) \/ 百度 (\d+) \/ 有道 (\d+) \/ GPT (\d+) \/ Sakura (\d+)/.test(span.textContent));
+                        const [_, total, , , , sakura] = targetSpan.textContent.match(/总计 (\d+) \/ 百度 (\d+) \/ 有道 (\d+) \/ GPT (\d+) \/ Sakura (\d+)/);
+                        const url = window.location.pathname.split('/novel')[1];
+                        const title = document.title;
+                        if (title.includes('轻小说机翻机器人')) throw Error('小說頁尚未載入');
+
+                        const novels = [{ url: url, total: total, sakura: sakura, description: title }];
+                        results = sepMode == '智能'
+                            ? await TaskUtils.assignTasksSmart(novels, smartJobLimit, smartChapterLimit, SettingUtils.getTranslateMode(mode))
+                            : await TaskUtils.assignTasksStatic(novels, pair, SettingUtils.getTranslateMode(mode));
+
+                        await StorageUtils.addJobs(StorageUtils.sakura, results);
+                    } catch (error) {
+                        errorFlag = true;
+                        NotificationUtils.showError(`Failed to fetch data for ${title}.`);
+                    }
+                    break;
+                }
+                default: { }
             }
-            while (activeCount > 0) {
-                await delay(50);
-            }
-            console.log('All Sakura tasks complete.');
+            if (errorFlag) return;
+            const novels = new Set(results.map(result => result.description));
+            NotificationUtils.showSuccess(`排隊成功 : 共 ${novels.size} 本小說, 均分 ${results.length} 分段.`);
         }
-    };
+    }
 
-    const moduleQueueGPT = {
-        name: '批量排隊GPT',
+    const moduleQueueGPTV2 = {
+        name: '排隊GPT v2',
         type: 'onclick',
-        whitelist: '/wenku',
+        whitelist: ['/wenku', '/novel'],
+        progress: { percentage: 0, info: '' },
         settings: [
+            newNumberSetting('單次擷取web數量(可破限)', 20),
+            newNumberSetting('擷取單頁wenku數量(deving)', 20),
             newSelectSetting('模式', ['常規', '過期', '重翻'], '常規'),
-            newNumberSetting('延遲間隔', 5),
-            newNumberSetting('並行延遲', 300),
-            newNumberSetting('並行數量', 5),
+            newSelectSetting('分段', ['智能', '固定'], '智能'),
+            newNumberSetting('智能均分任務上限', 1000),
+            newNumberSetting('智能均分章節下限', 5),
+            newNumberSetting('固定均分任務', 6),
+            newBooleanSetting('R18(需登入)', true),
             newStringSetting('bind', 'none'),
         ],
         run: async function (cfg) {
-            const delay = ms => new Promise(r => setTimeout(r, ms));
-            const pollInterval = getModuleSetting(cfg, '並行延遲') || 300;
-            const concurrentLimit = getModuleSetting(cfg, '並行數量') || 5;
-            const mode = getModuleSetting(cfg, '模式');
+            const webCatchLimit = getModuleSetting(cfg, '單次擷取web數量(可破限)') || 20;
+            const wenkuCatchLimit = getModuleSetting(cfg, '擷取單頁wenku數量(deving)') || 20;
+            const pair = getModuleSetting(cfg, '固定均分任務') || 6;
+            const smartJobLimit = getModuleSetting(cfg, '智能均分任務上限') || 1000;
+            const smartChapterLimit = getModuleSetting(cfg, '智能均分章節下限') || 5;
+            const type = TaskUtils.getTypeString(window.location.pathname);
+            const mode = getModuleSetting(cfg, '模式') || '常規';
+            const sepMode = getModuleSetting(cfg, '分段') || '智能';
+            const r18Bypass = getModuleSetting(cfg, 'R18(需登入)');
+
+            let results = [];
+            const maxRetries = 3;
+            let errorFlag = false;
+
             const modeMap = { '常規': '常规', '過期': '过期', '重翻': '重翻' };
             const cnMode = modeMap[mode] || '常规';
 
-            function setMode(doc) {
-                const tags = doc.querySelectorAll('.n-tag__content');
-                for (let i = 0; i < tags.length; i++) {
-                    if (tags[i].textContent.trim() === cnMode) {
-                        tags[i].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-                        break;
-                    }
-                }
-            }
-            async function clickGPTButtons(doc) {
-                const btns = [...doc.querySelectorAll('button')].filter(b =>
-                    b.textContent.includes('排队GPT')
-                );
-                btns.forEach(btn => {
-                    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-                });
-            }
-            if (location.pathname !== '/wenku') {
-                setMode(document);
-                await clickGPTButtons(document);
-                return;
-            }
-            const domain = window.location.origin;
-            const allLinks = [...document.querySelectorAll('a[href]')]
-                .map(a => a.href)
-                .filter(href => href.startsWith(domain) && /\/wenku\/[^/]+/.test(href));
-            const uniqueLinks = [...new Set(allLinks)];
 
-            async function waitForTabLoad(tab) {
-                const maxWait = 10000;
-                const startTime = Date.now();
-                while (true) {
-                    await delay(pollInterval);
-                    if (!tab || tab.closed) {
-                        throw new Error('New tab was closed or blocked before loading.');
-                    }
-                    if (tab.document && (tab.document.readyState === 'complete' || tab.document.querySelector('.n-tag__content'))) {
-                        break;
-                    }
-                    if (Date.now() - startTime > maxWait) {
-                        throw new Error('Timed out waiting for new tab to load.');
-                    }
-                }
-            }
-            async function processUrl(url) {
-                const newTab = window.open(url, '_blank');
-                if (!newTab) {
-                    throw new Error('Failed to open new tab for: ' + url);
-                }
-                await waitForTabLoad(newTab);
-                setMode(newTab.document);
-                await clickGPTButtons(newTab.document);
-                newTab.close();
-            }
-            let activeCount = 0, index = 0;
-            async function spawnNext() {
-                if (index >= uniqueLinks.length) return;
-                const url = uniqueLinks[index++];
-                activeCount++;
-                try {
-                    await processUrl(url);
-                } catch (err) {
-                    console.error('Failed to process:', url, err);
-                } finally {
-                    activeCount--;
-                }
-            }
-            while (index < uniqueLinks.length) {
-                if (activeCount < concurrentLimit) {
-                    spawnNext();
-                } else {
-                    await delay(50);
-                }
-            }
-            while (activeCount > 0) {
-                await delay(50);
-            }
-            console.log('All GPT tasks complete.');
-        }
-    };
+            switch (type) {
+                case 'wenkus': {
+                    const wenkuIds = TaskUtils.wenkuIds();
+                    const apiEndpoint = `/api/wenku/`;
 
-    const moduleQueueWebSakura = {
-        name: '自訂排隊Sakura',
-        type: 'onclick',
-        whitelist: '/novel/*',
-        settings: [
-            newNumberSetting('均分任務', 10),
-        ],
-        run: async function (cfg) {
-            const pair = getModuleSetting(cfg, '均分任務');
+                    await Promise.all(
+                        wenkuIds.map(async (id) => {
+                            let attempts = 0;
+                            let success = false;
 
+                            while (attempts < maxRetries && !success) {
+                                try {
+                                    const response = await script.fetch(`${window.location.origin}${apiEndpoint}${id}`, r18Bypass);
+                                    if (!response.ok) throw new Error('Network response was not ok');
+                                    const data = await response.json();
+                                    const volumeIds = data.volumeJp.map(volume => volume.volumeId);
+
+                                    volumeIds.forEach(name => results.push({ task: TaskUtils.wenkuLinkBuilder(id, name, mode), description: name }))
+                                    success = true;
+                                } catch (error) {
+                                    NotificationUtils.showError(`Failed to fetch data for ID ${id}, attempt ${attempts + 1}:`);
+                                    attempts++;
+                                    if (attempts < maxRetries) {
+                                        await new Promise(resolve => setTimeout(resolve, 1000));
+                                    }
+                                }
+                            }
+                        })
+                    );
+                    await StorageUtils.addJobs(StorageUtils.gpt, results);
+                    break;
+                };
+                case 'wenku': {
+                    await TaskUtils.clickButtons(cnMode);
+                    await TaskUtils.clickButtons('排队Sakura');
+                    break;
+                }
+                case 'novels': {
+                    const apiUrl = TaskUtils.webSearchApi(webCatchLimit);
+                    try {
+                        const response = await script.fetch(`${window.location.origin}${apiUrl}`, r18Bypass)
+                        if (!response.ok) throw new Error('Network response was not ok');
+                        const data = await response.json();
+                        const novels = data.items.map(item => {
+                            const title = item.titleZh ?? item.titleJp;
+                            return {
+                                url: `/${item.providerId}/${item.novelId}`,
+                                description: title,
+                                total: item.total,
+                                gpt: item.gpt
+                            };
+                        });
+                        results = sepMode == '智能'
+                            ? await TaskUtils.assignTasksSmart(novels, smartJobLimit, smartChapterLimit, SettingUtils.getTranslateMode(mode))
+                            : await TaskUtils.assignTasksStatic(novels, pair, SettingUtils.getTranslateMode(mode));
+
+                        await StorageUtils.addJobs(StorageUtils.gpt, results);
+                    } catch (error) {
+                        errorFlag = true;
+                        NotificationUtils.showError(`Failed to fetch data for ID ${id}, attempt ${attempts + 1}:`);
+                    }
+                    break;
+                }
+                case 'novel': {
+                    try {
+                        const targetSpan = Array.from(document.querySelectorAll('span.n-text')).find(span => /总计 (\d+) \/ 百度 (\d+) \/ 有道 (\d+) \/ GPT (\d+) \/ Sakura (\d+)/.test(span.textContent));
+                        const [_, total, , , gpt] = targetSpan.textContent.match(/总计 (\d+) \/ 百度 (\d+) \/ 有道 (\d+) \/ GPT (\d+) \/ Sakura (\d+)/);
+                        const url = window.location.pathname.split('/novel')[1];
+
+                        const title = document.title;
+                        if (title.includes('轻小说机翻机器人')) throw Error('小說頁尚未載入');
+
+                        const novels = [{ url: url, total: total, gpt: gpt, description: title }]
+
+                        results = sepMode == '智能'
+                            ? await TaskUtils.assignTasksSmart(novels, smartJobLimit, smartChapterLimit, SettingUtils.getTranslateMode(mode))
+                            : await TaskUtils.assignTasksStatic(novels, pair, SettingUtils.getTranslateMode(mode));
+
+                        await StorageUtils.addJobs(StorageUtils.gpt, results);
+                    } catch (error) {
+                        errorFlag = true;
+                        NotificationUtils.showError(`Failed to fetch data for ${title}.`);
+                    }
+                    break;
+                }
+                default: { }
+            }
+            if (errorFlag) return;
+            const novels = new Set(results.map(result => result.description));
+            NotificationUtils.showSuccess(`排隊成功 : 共 ${novels.size} 本小說, 均分 ${results.length} 分段.`);
         }
     }
 
@@ -392,8 +438,6 @@
         _lastRun: 0,
         _interval: 1000,
         run: async function (cfg) {
-            const delay = ms => new Promise(r => setTimeout(r, ms));
-
             const now = Date.now();
             if (now - this._lastRun < this._interval) return;
             this._lastRun = now;
@@ -432,72 +476,9 @@
 
             if (unfinished.length > 0 && this._attempts < maxAttempts) {
                 this._attempts = await retryTasks(this._attempts);
-                delay(10);
+                script.delay(10);
                 if (relaunch) {
                     script.runModule('啟動翻譯器');
-                }
-            }
-        }
-    };
-
-    const moduleCacheOptimization = {
-        name: '緩存優化',
-        type: 'keep',
-        whitelist: '',
-        settings: [
-            newNumberSetting('同步間隔', 1000)
-        ],
-        _lastRun: 0,
-        _proxyDefined: false,
-        run: async function (cfg) {
-            const now = Date.now();
-            const intervalMs = getModuleSetting(cfg, '同步間隔') || 1000;
-            if (now - this._lastRun < intervalMs) return;
-            this._lastRun = now;
-
-            const origSession = window.sessionStorage;
-            if (!this._proxyDefined) {
-                this._proxyDefined = true;
-                try {
-                    const proxyStorage = new Proxy(origSession, {
-                        get(target, prop) {
-                            if (typeof prop === 'string') {
-                                let val = target[prop];
-                                if (val === undefined) {
-                                    val = localStorage.getItem(prop);
-                                    if (val !== null) {
-                                        target.setItem(prop, val);
-                                    }
-                                }
-                                return val;
-                            }
-                            return target[prop];
-                        },
-                        set(target, prop, value) {
-                            target[prop] = value;
-                            localStorage.setItem(prop, value);
-                            return true;
-                        }
-                    });
-                    Object.defineProperty(window, 'sessionStorage', { value: proxyStorage, configurable: true });
-                } catch (e) {
-                    console.error('Failed setting proxy for sessionStorage:', e);
-                }
-            }
-            // Sync localStorage -> sessionStorage
-            for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                const localVal = localStorage.getItem(key);
-                const sessVal = origSession[key];
-                if (sessVal !== localVal) {
-                    origSession[key] = localVal;
-                    try {
-                        window.dispatchEvent(new StorageEvent('storage', {
-                            key,
-                            newValue: localVal,
-                            storageArea: origSession
-                        }));
-                    } catch (e) { }
                 }
             }
         }
@@ -508,13 +489,191 @@
         moduleAddGPTTranslator,
         moduleDeleteTranslator,
         moduleLaunchTranslator,
-        moduleQueueSakura,
-        moduleQueueGPT,
+        moduleQueueSakuraV2,
+        moduleQueueGPTV2,
         moduleAutoRetry,
-        moduleCacheOptimization
     ];
 
-    
+    // -----------------------------------
+    // Setting Utils
+    // -----------------------------------
+    class SettingUtils {
+        static getTranslateMode(mode) {
+            const map = { '常規': 'normal', '過期': 'expire', '重翻': 'all' };
+            return map[mode];
+        }
+    }
+
+    // -----------------------------------
+    // TaskUtils Utils
+    // -----------------------------------
+    class TaskUtils {
+        static getTypeString = (url) => {
+            const patterns = {
+                'wenkus': new RegExp(`^/wenku(\\?.*)?$`), // Matches /wenku and /wenku?params
+                'wenku': new RegExp(`^/wenku\\/.*(\\?.*)?$`), // Matches /wenku/* and /wenku/*?params
+                'novels': new RegExp(`^/novel(\\?.*)?$`), // Matches /novel and /novel?params
+                'novel': new RegExp(`^/novel\\/.*(\\?.*)?$`) // Matches /novel/*/* and /novel/*/*?params
+            };
+            for (const [key, pattern] of Object.entries(patterns)) {
+                if (pattern.test(url)) {
+                    return key;
+                }
+            }
+            return null;
+        };
+
+        static wenkuLinkBuilder(series, name, mode) {
+            return `wenku/${series}/${name}?level=${mode}&forceMetadata=false&startIndex=0&endIndex=65536`
+        }
+
+        static webLinkBuilder(url, from = 0, to = 65536, mode) {
+            return `web${url}?level=${mode}&forceMetadata=false&startIndex=${from}&endIndex=${to}`
+        }
+
+        //return "id"
+        static wenkuIds() {
+            const links = [...document.querySelectorAll('a[href^="/wenku/"]')];
+            return links.map(link => link.getAttribute('href').split('/wenku/')[1]);
+        }
+
+        //return api link
+        static webSearchApi(limit = 20) {
+            const urlParams = new URLSearchParams(location.search), page = Math.max(urlParams.get('page') - 1 || 0, 0);
+            const input = document.querySelector('input[placeholder="中/日文标题或作者"]');
+            let rawQuery = input ? input.value.trim() : '';
+
+            const query = encodeURIComponent(rawQuery);
+            const selected = [...document.querySelectorAll('.n-text.__text-dark-131ezvy-p')].map(e => e.textContent.trim());
+
+            const sourceMap = {
+                Kakuyomu: 'kakuyomu',
+                '成为小说家吧': 'syosetu',
+                Novelup: 'novelup',
+                Hameln: 'hameln',
+                Pixiv: 'pixiv',
+                Alphapolis: 'alphapolis'
+            };
+            const typeMap = { '连载中': '1', '已完结': '2', '短篇': '3', '全部': '0' };
+            const levelMap = { '一般向': '1', 'R18': '2', '全部': '0' };
+            const translateMap = { 'GPT': '1', 'Sakura': '2', '全部': '0' };
+            const sortMap = { '更新': '0', '点击': '1', '相关': '2' };
+            const providers = Object.keys(sourceMap)
+                .filter(k => selected.includes(k))
+                .map(k => sourceMap[k])
+                .join(',') || 'kakuyomu,syosetu,novelup,hameln,pixiv,alphapolis';
+            const tKey = Object.keys(typeMap).find(x => selected.includes(x)) || '全部';
+            const lKey = Object.keys(levelMap).find(x => selected.includes(x)) || '全部';
+            const trKey = Object.keys(translateMap).find(x => selected.includes(x)) || '全部';
+            const sKey = Object.keys(sortMap).find(x => selected.includes(x)) || '更新';
+
+            return `/api/novel?page=${page}&pageSize=${limit}&query=${query}` +
+                `&provider=${encodeURIComponent(providers)}&type=${typeMap[tKey]}&level=${levelMap[lKey]}` +
+                `&translate=${translateMap[trKey]}&sort=${sortMap[sKey]}`;
+        }
+
+        //return { task, description }
+        static async assignTasksSmart(novels, smartJobLimit, smartChapterLimit, mode) {
+            function undone(n) {
+                if (mode === "normal") {
+                    const sOrG = (n.sakura ?? n.gpt) || 0;
+                    return n.total - sOrG;
+                }
+                return n.total;
+            }
+            const totalChapters = novels.reduce((acc, n) => acc + undone(n), 0);
+            const potentialMaxTask = Math.floor(totalChapters / smartChapterLimit);
+            let maxTasks = Math.min(potentialMaxTask, smartJobLimit);
+
+            if (maxTasks <= 0 && totalChapters > 0) {
+                maxTasks = smartJobLimit;
+            }
+            if (totalChapters === 0) {
+                return [];
+            }
+            const chunkSize = Math.ceil(totalChapters / (maxTasks || 1));
+            const sorted = [...novels].sort((a, b) => undone(b) - undone(a));
+
+            const result = [];
+            let usedTasks = 0;
+
+            for (const novel of sorted) {
+                let remain = undone(novel);
+                if (remain <= 0) continue;
+
+                let startIndex = (mode === "normal") ? (novel.total - remain) : 0;
+
+                while (remain > 0 && usedTasks < smartJobLimit) {
+                    const thisChunk = Math.min(remain, chunkSize);
+                    const endIndex = startIndex + thisChunk;
+
+                    result.push({
+                        task: TaskUtils.webLinkBuilder(novel.url, startIndex, endIndex, mode),
+                        description: novel.description
+                    });
+
+                    usedTasks++;
+                    remain -= thisChunk;
+                    startIndex = endIndex;
+                    if (usedTasks >= smartJobLimit) {
+                        break;
+                    }
+                }
+                if (usedTasks >= smartJobLimit) {
+                    break;
+                }
+            }
+
+            return result;
+        }
+
+        //return { task, description }
+        static async assignTasksStatic(novels, parts, mode) {
+            function undone(n) {
+                if (mode === "normal") {
+                    const sOrG = (n.sakura ?? n.gpt) || 0;
+                    return n.total - sOrG;
+                }
+                return n.total;
+            }
+
+            const result = [];
+
+            for (const novel of novels) {
+                const totalChapters = undone(novel);
+                if (totalChapters <= 0) continue;
+                const startBase = (mode === "normal")
+                    ? (novel.total - totalChapters)
+                    : 0;
+
+                const chunkSize = Math.ceil(totalChapters / parts);
+
+                for (let i = 0; i < parts; i++) {
+                    const chunkStart = startBase + i * chunkSize;
+                    const chunkEnd = (i === parts - 1)
+                        ? (startBase + totalChapters)
+                        : (chunkStart + chunkSize);
+
+                    if (chunkStart < startBase + totalChapters) {
+                        result.push({
+                            task: TaskUtils.webLinkBuilder(novel.url, chunkStart, chunkEnd, mode),
+                            description: novel.description
+                        });
+                    }
+                }
+            }
+            return result;
+        }
+
+        static async clickButtons(name = '') {
+            const btns = document.querySelectorAll('button');
+            btns.forEach(btn => {
+                if (name === '' || btn.textContent.includes(name)) {
+                    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                }
+            });
+        }
+    }
 
     // -----------------------------------
     // Storage Utils
@@ -523,7 +682,7 @@
         static sakura = 'sakura-workspace';
         static gpt = 'gpt-workspace';
 
-        static _setData(key, data) {
+        static async _setData(key, data) {
             localStorage.setItem(key, JSON.stringify(data));
             window.dispatchEvent(new StorageEvent('storage', {
                 key: key,
@@ -533,7 +692,7 @@
             }));
         }
 
-        static _getData(key) {
+        static async _getData(key) {
             let raw = localStorage.getItem(key);
             if (raw) {
                 return JSON.parse(raw);
@@ -541,9 +700,9 @@
             return { workers: [], jobs: [], uncompletedJobs: [] };
         }
 
-        static addSakuraWorker(id, endpoint, amount = null, prevSegLength = 500, segLength = 500) {
+        static async addSakuraWorker(id, endpoint, amount = null, prevSegLength = 500, segLength = 500) {
             const total = amount ?? -1;
-            let data = this._getData(this.sakura);
+            let data = await this._getData(this.sakura);
 
             function _dataInsert(id, endpoint, prevSegLength, segLength) {
                 const worker = { id, endpoint, prevSegLength, segLength };
@@ -557,16 +716,16 @@
             if (total == -1) {
                 _dataInsert(id, endpoint, prevSegLength, segLength);
             } else {
-                for (let i = 1; i < total+1; i++) {
+                for (let i = 1; i < total + 1; i++) {
                     _dataInsert(id + i, endpoint, prevSegLength, segLength);
                 }
             }
-            this._setData(this.sakura, data);
+            await this._setData(this.sakura, data);
         }
 
-        static addGPTWorker(id, model, endpoint, key, amount = null) {
+        static async addGPTWorker(id, model, endpoint, key, amount = null) {
             const total = amount ?? -1;
-            let data = this._getData(this.gpt);
+            let data = await this._getData(this.gpt);
 
             function _dataInsert(id, model, endpoint, key) {
                 const worker = { id, type: 'api', model, endpoint, key };
@@ -584,32 +743,89 @@
                     _dataInsert(id + i, model, endpoint, key);
                 }
             }
-            this._setData(this.gpt, data);
+            await this._setData(this.gpt, data);
         }
 
-        static removeWorker(key, id) {
-            let data = this._getData(key);
+        static async removeWorker(key, id) {
+            let data = await this._getData(key);
             data.workers = data.workers.filter(w => w.id !== id);
-            this._setData(key, data);
+            await this._setData(key, data);
         }
 
-        static removeAllWorkers(key, exclude = []) {
-            let data = this._getData(key);
+        static async removeAllWorkers(key, exclude = []) {
+            let data = await this._getData(key);
             data.workers = data.workers.filter(w => exclude.includes(w.id));
-            this._setData(key, data);
+            await this._setData(key, data);
         }
 
-        static addJob(key, task, description, createAt = Date.now()) {
+        static async addJob(key, task, description, createAt = Date.now()) {
             const job = { task, description, createAt };
-            let data = this._getData(key);
+            let data = await this._getData(key);
             data.jobs.push(job);
-            this._setData(key, data);
+            await this._setData(key, data);
         }
 
-        static getUncompletedJobs(key) {
-            return this._getData(key).uncompletedJobs;
+        static async addJobs(key, jobs = [], createAt = Date.now()) {
+            let data = await this._getData(key);
+            console.log(jobs);
+            const existingTasks = new Set(data.jobs.map(job => job.task));
+            jobs.forEach(({ task, description }) => {
+                if (!existingTasks.has(task)) {
+                    const job = { task, description, createAt };
+                    data.jobs.push(job);
+                }
+            });
+            await this._setData(key, data);
+        }
+
+        static async getUncompletedJobs(key) {
+            return (await this._getData(key)).uncompletedJobs;
         }
     }
+
+    class NotificationUtils {
+        static _initContainer() {
+            if (!this._container) {
+                this._container = document.createElement('div');
+                this._container.className = 'ntr-notification-container';
+                document.body.appendChild(this._container);
+            }
+        }
+
+        static showSuccess(text) {
+            this._show(text, '✅');
+        }
+
+        static showWarning(text) {
+            this._show(text, '⚠️');
+        }
+
+        static showError(text) {
+            this._show(text, '❌');
+        }
+
+        static _show(msg, icon) {
+            this._initContainer();
+            const box = document.createElement('div');
+            box.className = 'ntr-notification-message';
+
+            const iconSpan = document.createElement('span');
+            iconSpan.className = 'ntr-icon';
+            iconSpan.textContent = icon;
+
+            const textNode = document.createTextNode(msg);
+
+            box.appendChild(iconSpan);
+            box.appendChild(textNode);
+            this._container.appendChild(box);
+
+            setTimeout(() => {
+                box.classList.add('fade-out');
+                setTimeout(() => box.remove(), 300);
+            }, 1000);
+        }
+    }
+
 
     // -----------------------------------
     // Main Toolbox
@@ -620,6 +836,7 @@
             this.keepActiveSet = new Set();
             this.headerMap = new Map();
             this._pollTimer = null;
+            this.token = this.initToken();
 
             this._lastKeepRun = 0;
             this._lastVisRun = 0;
@@ -637,7 +854,7 @@
                 _lastRun: 0
             }));
         }
-        
+
         static DragHandler = class {
             constructor(panel, title) {
                 this.panel = panel;
@@ -685,6 +902,45 @@
                         top: this.panel.style.top
                     }));
                 });
+                // Touch events for mobile
+                this.title.addEventListener('touchstart', (e) => {
+                    // Disable transitions while dragging
+                    this.panel.style.transition = 'none';
+                    this.dragging = true;
+                    const touch = e.touches[0];
+                    this.offsetX = touch.clientX - this.panel.offsetLeft;
+                    this.offsetY = touch.clientY - this.panel.offsetTop;
+                    e.preventDefault();
+                }, { passive: false });
+
+                document.addEventListener('touchmove', (e) => {
+                    if (!this.dragging) return;
+                    const touch = e.touches[0];
+                    const newLeft = touch.clientX - this.offsetX;
+                    const newTop = touch.clientY - this.offsetY;
+                    this.panel.style.left = newLeft + 'px';
+                    this.panel.style.top = newTop + 'px';
+                    this.clampPosition();
+                    e.preventDefault();
+                }, { passive: false });
+
+                document.addEventListener('touchend', (e) => {
+                    if (!this.dragging) return;
+                    this.dragging = false;
+                    // Re-enable transitions
+                    this.panel.style.transition = 'width 0.3s ease, height 0.3s ease, top 0.3s ease, left 0.3s ease';
+                    const rect = this.panel.getBoundingClientRect();
+                    let left = rect.left;
+                    let top = rect.top;
+                    left = Math.min(Math.max(left, 0), window.innerWidth - rect.width);
+                    top = Math.min(Math.max(top, 0), window.innerHeight - rect.height);
+                    this.panel.style.left = left + 'px';
+                    this.panel.style.top = top + 'px';
+                    localStorage.setItem('ntr-panel-position', JSON.stringify({
+                        left: this.panel.style.left,
+                        top: this.panel.style.top
+                    }));
+                }, { passive: false });
             }
 
             clampPosition() {
@@ -700,6 +956,15 @@
                 this.panel.style.left = left + 'px';
                 this.panel.style.top = top + 'px';
             }
+        }
+
+        initToken() {
+            const authInfo = localStorage.getItem('authInfo');
+            if (authInfo) {
+                const parsedInfo = JSON.parse(authInfo);
+                return parsedInfo.profile.token;
+            }
+            return null;
         }
 
         loadConfiguration() {
@@ -823,6 +1088,7 @@
             }, 150);
 
             if (IS_MOBILE) {
+                // On mobile, single tap toggles minimized state.
                 this.titleBar.addEventListener('click', e => {
                     if (!this.dragHandler.dragging) {
                         e.preventDefault();
@@ -892,8 +1158,6 @@
                         }
                     };
                 }
-
-                // Build settings
                 if (Array.isArray(mod.settings)) {
                     mod.settings.forEach(s => {
                         const row = document.createElement('div');
@@ -1097,7 +1361,7 @@
         runModule(name) {
             this.configuration.modules.filter(mod => mod.name == name).forEach(mod => {
                 if (typeof mod.run === 'function') {
-                    mod.run(mod);
+                    mod.run(mod, true);
                 }
             });
         }
@@ -1173,7 +1437,6 @@
                         left = parseFloat(this.panel.style.left) || newRect.left;
                         top = parseFloat(this.panel.style.top) || newRect.top;
                 }
-                // clamp to viewport
                 left = Math.min(Math.max(left, 0), window.innerWidth - newRect.width);
                 top = Math.min(Math.max(top, 0), window.innerHeight - newRect.height);
                 this.panel.style.left = left + 'px';
@@ -1183,6 +1446,20 @@
                     top: this.panel.style.top
                 }));
             }, 310);
+        }
+
+        async fetch(url, bypass = false) {
+            if (bypass && this.token) {
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${this.token}`
+                    }
+                });
+                return response;
+            } else {
+                return await fetch(url);
+            }
         }
 
         delay(ms) {
@@ -1223,8 +1500,8 @@
         padding: 6px;
         background: #232323;
         border-radius: 4px;
-        overflow: hidden;
-        max-height: 500px;
+        overflow-y: auto;
+        max-height: 80vh;
         transition: max-height 0.3s ease;
     }
     #ntr-panel.minimized .ntr-panel-body {
@@ -1289,6 +1566,37 @@
         background: #63E2B7 !important;
         color: #fff !important;
     }
+    .ntr-notification-container {
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .ntr-notification-message {
+        display: flex;
+        align-items: center;
+        min-width: 200px;
+        margin-top: 8px;
+        padding: 4px 8px;
+        border-radius: 4px;
+        background-color: #2A2A2A;
+        color: #fff;
+        font-size: 14px;
+        font-family: sans-serif;
+        opacity: 1;
+        transition: opacity 0.3s ease;
+    }
+    .ntr-notification-message .ntr-icon {
+        margin-right: 4px;
+        font-size: 16px;
+    }
+    .ntr-notification-message.fade-out {
+        opacity: 0;
+    }
     @media only screen and (max-width:600px) {
         #ntr-panel {
             transform: scale(0.6);
@@ -1299,8 +1607,7 @@
     document.head.appendChild(css);
 
     // -----------------------------------
-    // Start
+    // Init Script
     // -----------------------------------
     const script = new NTRToolBox();
-    const storageUtil = new StorageUtils();
 })();
