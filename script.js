@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NTR ToolBox
 // @namespace    http://tampermonkey.net/
-// @version      v0.4.3
+// @version      v0.5
 // @author       TheNano
 // @description  ToolBox for Novel Translate bot website
 // @match        https://books.fishhawk.top/*
@@ -20,8 +20,8 @@
 
     window._NTRToolBoxInstance = true;
 
-    const CONFIG_VERSION = 17;
-    const VERSION = 'v0.4.3';
+    const CONFIG_VERSION = 20;
+    const VERSION = 'v0.5';
     const CONFIG_STORAGE_KEY = 'NTR_ToolBox_Config';
     const IS_MOBILE = /Mobi|Android/i.test(navigator.userAgent);
     const domainAllowed = (location.hostname === 'books.fishhawk.top' || location.hostname === 'books1.fishhawk.top');
@@ -54,11 +54,14 @@
         const whitelist = modItem.whitelist;
         const parts = Array.isArray(whitelist) ? whitelist : [whitelist];
         return domainAllowed && parts.some(p => {
-            if (typeof p === 'string' && p.endsWith('/*')) {
-                const base = p.slice(0, -2);
-                return location.pathname.startsWith(base + '/');
+            if (typeof p === 'string') {
+                if (p.endsWith('/*')) {
+                    const base = p.slice(0, -2);
+                    return location.pathname.startsWith(base) || location.pathname === base;
+                }
+                return location.pathname.includes(p);
             }
-            return typeof p === 'string' && location.pathname.includes(p);
+            return false;
         });
     }
 
@@ -176,7 +179,7 @@
     const moduleQueueSakuraV2 = {
         name: '排隊Sakura v2',
         type: 'onclick',
-        whitelist: ['/wenku', '/novel'],
+        whitelist: ['/wenku', '/novel', '/favorite'],
         progress: { percentage: 0, info: '' },
         settings: [
             newNumberSetting('單次擷取web數量(可破限)', 20),
@@ -290,6 +293,103 @@
                     }
                     break;
                 }
+                case 'favorite-web': {
+                    const url = new URL(window.location.href);
+                    //get folder id
+                    const id = url.pathname.endsWith('/web') ? 'default' : url.pathname.split('/').pop();
+                    let tries = 0;
+                    let page = 0;
+
+                    while (true) {
+                        const apiUrl = `${url.origin}/api/user/favored-web/${id}?page=${page}&pageSize=90&sort=update`;
+                        let tasks = [];
+                        let novelCount = 0;
+                        try {
+                            const response = await script.fetch(apiUrl);
+                            const data = await response.json();
+                            const novels = data.items.map(item => {
+                                const title = item.titleZh ?? item.titleJp;
+                                return {
+                                    url: `/${item.providerId}/${item.novelId}`,
+                                    description: title,
+                                    total: item.total,
+                                    sakura: item.sakura
+                                };
+                            });
+                            novelCount = novels.length;
+                            tasks = sepMode == '智能'
+                                ? await TaskUtils.assignTasksSmart(novels, smartJobLimit, smartChapterLimit, SettingUtils.getTranslateMode(mode))
+                                : await TaskUtils.assignTasksStatic(novels, pair, SettingUtils.getTranslateMode(mode));
+
+                            await StorageUtils.addJobs(StorageUtils.sakura, tasks);
+                            results.push(tasks);
+                            NotificationUtils.showSuccess(`成功排隊 ${3 * page + 1}-${3 * page + 3}頁, 共${tasks.length}個任務`);
+                        } catch (error) {
+                            console.log(error);
+                            NotificationUtils.showError(`Failed to fetch data for ${id}, page ${page + 1}.`);
+                            if (tries++ > 3) break;
+                            continue;
+                        }
+                        if (novelCount < 90) break;
+                        else page++;
+                    }
+                    break;
+                }
+                case 'favorite-wenku': {
+                    const url = new URL(window.location.href);
+                    //get folder id
+                    const id = url.pathname.endsWith('/wenku') ? 'default' : url.pathname.split('/').pop();
+                    let page = 0;
+                    let tries = 0;
+                    while (true) {
+                        const apiUrl = `${url.origin}/api/user/favored-wenku/${id}?page=${page}&pageSize=72&sort=update`;
+                        let tasks = [];
+                        let novelCount = 0;
+                        try {
+                            const response = await script.fetch(apiUrl);
+                            const data = await response.json();
+                            const wenkuIds = data.items.map(novel => novel.id);
+                            novelCount = wenkuIds.length;
+
+                            await Promise.all(
+                                wenkuIds.map(async (id) => {
+                                    let attempts = 0;
+                                    let success = false;
+                                    const apiEndpoint = `/api/wenku/`;
+
+                                    while (attempts < maxRetries && !success) {
+                                        try {
+                                            const response = await script.fetch(`${window.location.origin}${apiEndpoint}${id}`, r18Bypass);
+                                            if (!response.ok) throw new Error('Network response was not ok');
+                                            const data = await response.json();
+                                            const volumeIds = data.volumeJp.map(volume => volume.volumeId);
+
+                                            volumeIds.forEach(name => tasks.push({ task: TaskUtils.wenkuLinkBuilder(id, name, mode), description: name }))
+                                            success = true;
+                                        } catch (error) {
+                                            NotificationUtils.showError(`Failed to fetch data for ID ${id}, attempt ${attempts + 1}:`);
+                                            attempts++;
+                                            if (attempts < maxRetries) {
+                                                await new Promise(resolve => setTimeout(resolve, 1000));
+                                            }
+                                        }
+                                    }
+                                })
+                            );
+                            await StorageUtils.addJobs(StorageUtils.sakura, tasks);
+                            results.push(tasks);
+                            NotificationUtils.showSuccess(`成功排隊 ${3 * page + 1}-${3 * page + 3}頁, 共${tasks.length}本小說`);
+                        } catch (error) {
+                            console.log(error);
+                            NotificationUtils.showError(`Failed to fetch data for ${id}, page ${page + 1}.`);
+                            if (tries > 3) break;
+                            continue;
+                        }
+                        if (novelCount < 72) break;
+                        else page++;
+                    }
+                    break;
+                }
                 default: { }
             }
             if (errorFlag) return;
@@ -301,7 +401,7 @@
     const moduleQueueGPTV2 = {
         name: '排隊GPT v2',
         type: 'onclick',
-        whitelist: ['/wenku', '/novel'],
+        whitelist: ['/wenku', '/novel', '/favorite/web'],
         progress: { percentage: 0, info: '' },
         settings: [
             newNumberSetting('單次擷取web數量(可破限)', 20),
@@ -418,6 +518,103 @@
                     }
                     break;
                 }
+                case 'favorite-web': {
+                    const url = new URL(window.location.href);
+                    //get folder id
+                    const id = url.pathname.endsWith('/web') ? 'default' : url.pathname.split('/').pop();
+                    let tries = 0;
+                    let page = 0;
+
+                    while (true) {
+                        const apiUrl = `${url.origin}/api/user/favored-web/${id}?page=${page}&pageSize=90&sort=update`;
+                        let tasks = [];
+                        let novelCount = 0;
+                        try {
+                            const response = await script.fetch(apiUrl);
+                            const data = await response.json();
+                            const novels = data.items.map(item => {
+                                const title = item.titleZh ?? item.titleJp;
+                                return {
+                                    url: `/${item.providerId}/${item.novelId}`,
+                                    description: title,
+                                    total: item.total,
+                                    gpt: item.gpt
+                                };
+                            });
+                            novelCount = novels.length;
+                            tasks = sepMode == '智能'
+                                ? await TaskUtils.assignTasksSmart(novels, smartJobLimit, smartChapterLimit, SettingUtils.getTranslateMode(mode))
+                                : await TaskUtils.assignTasksStatic(novels, pair, SettingUtils.getTranslateMode(mode));
+
+                            await StorageUtils.addJobs(StorageUtils.gpt, tasks);
+                            results.push(tasks);
+                            NotificationUtils.showSuccess(`成功排隊 ${3 * page + 1}-${3 * page + 3}頁, 共${novelCount}本小說`);
+                        } catch (error) {
+                            console.log(error);
+                            NotificationUtils.showError(`Failed to fetch data for ${id}, page ${page + 1}.`);
+                            if (tries++ > 3) break;
+                            continue;
+                        }
+                        if (novelCount < 90) break;
+                        else page++;
+                    }
+                    break;
+                }
+                case 'favorite-wenku': {
+                    const url = new URL(window.location.href);
+                    //get folder id
+                    const id = url.pathname.endsWith('/wenku') ? 'default' : url.pathname.split('/').pop();
+                    let page = 0;
+                    let tries = 0;
+                    while (true) {
+                        const apiUrl = `${url.origin}/api/user/favored-wenku/${id}?page=${page}&pageSize=72&sort=update`;
+                        let tasks = [];
+                        let novelCount = 0;
+                        try {
+                            const response = await script.fetch(apiUrl);
+                            const data = await response.json();
+                            const wenkuIds = data.items.map(novel => novel.id);
+                            novelCount = wenkuIds.length;
+
+                            await Promise.all(
+                                wenkuIds.map(async (id) => {
+                                    let attempts = 0;
+                                    let success = false;
+                                    const apiEndpoint = `/api/wenku/`;
+
+                                    while (attempts < maxRetries && !success) {
+                                        try {
+                                            const response = await script.fetch(`${window.location.origin}${apiEndpoint}${id}`, r18Bypass);
+                                            if (!response.ok) throw new Error('Network response was not ok');
+                                            const data = await response.json();
+                                            const volumeIds = data.volumeJp.map(volume => volume.volumeId);
+
+                                            volumeIds.forEach(name => tasks.push({ task: TaskUtils.wenkuLinkBuilder(id, name, mode), description: name }))
+                                            success = true;
+                                        } catch (error) {
+                                            NotificationUtils.showError(`Failed to fetch data for ID ${id}, attempt ${attempts + 1}:`);
+                                            attempts++;
+                                            if (attempts < maxRetries) {
+                                                await new Promise(resolve => setTimeout(resolve, 1000));
+                                            }
+                                        }
+                                    }
+                                })
+                            );
+                            await StorageUtils.addJobs(StorageUtils.gpt, tasks);
+                            results.push(tasks);
+                            NotificationUtils.showSuccess(`成功排隊 ${3 * page + 1}-${3 * page + 3}頁, 共${tasks.length}本小說`);
+                        } catch (error) {
+                            console.log(error);
+                            NotificationUtils.showError(`Failed to fetch data for ${id}, page ${page + 1}.`);
+                            if (tries > 3) break;
+                            continue;
+                        }
+                        if (novelCount < 72) break;
+                        else page++;
+                    }
+                    break;
+                }
                 default: { }
             }
             if (errorFlag) return;
@@ -432,6 +629,7 @@
         whitelist: '/workspace/*',
         settings: [
             newNumberSetting('最大重試次數', 99),
+            newBooleanSetting('置頂重試任務', false),
             newBooleanSetting('重啟翻譯器', true),
         ],
         _attempts: 0,
@@ -444,10 +642,11 @@
 
             const maxAttempts = getModuleSetting(cfg, '最大重試次數') || 99;
             const relaunch = getModuleSetting(cfg, '重啟翻譯器') || 3;
+            const moveToTop = getModuleSetting(cfg, '置頂重試任務');
 
             if (!this._boundClickHandler) {
                 this._boundClickHandler = (e) => {
-                    if (e.target.tagName === 'BUTTON') {
+                    if (e.target.tagName === 'button') {
                         this._attempts = 0;
                     }
                 };
@@ -468,6 +667,9 @@
                         for (let i = 0; i < clickCount; i++) {
                             retryBtns[0].click();
                         }
+                        if (moveToTop) {
+                            TaskUtils.clickTaskMoveToTop(unfinished.length);
+                        }
                         attempts++;
                     }
                 }
@@ -484,6 +686,29 @@
         }
     };
 
+    const moduleBlockUser = {
+        name: '屏蔽用戶',
+        type: 'keep',
+        whitelist: '',
+        settings: [
+            newStringSetting('apiKey', ''),
+            
+        ]
+
+    }
+
+    const moduleSyncStorage = {
+        name: '資料同步',
+        type: 'onclick',
+        whitelist: '/workspace/*',
+        hidden: true,
+        settings: [
+            newStringSetting('bind', 'none')
+        ],
+        run: async function (cfg) {
+        }
+    }
+
     const defaultModules = [
         moduleAddSakuraTranslator,
         moduleAddGPTTranslator,
@@ -492,6 +717,7 @@
         moduleQueueSakuraV2,
         moduleQueueGPTV2,
         moduleAutoRetry,
+        moduleSyncStorage,
     ];
 
     // -----------------------------------
@@ -513,7 +739,10 @@
                 'wenkus': new RegExp(`^/wenku(\\?.*)?$`), // Matches /wenku and /wenku?params
                 'wenku': new RegExp(`^/wenku\\/.*(\\?.*)?$`), // Matches /wenku/* and /wenku/*?params
                 'novels': new RegExp(`^/novel(\\?.*)?$`), // Matches /novel and /novel?params
-                'novel': new RegExp(`^/novel\\/.*(\\?.*)?$`) // Matches /novel/*/* and /novel/*/*?params
+                'novel': new RegExp(`^/novel\\/.*(\\?.*)?$`), // Matches /novel/*/* and /novel/*/*?params
+                'favorite-web': new RegExp(`^/favorite/web(/.*)?(\\?.*)?$`), // Matches /favorite/web and /favorite/web/* and /favorite/web?params
+                'favorite-wenku': new RegExp(`^/favorite/wenku(/.*)?(\\?.*)?$`), // Matches /favorite/wenku and /favorite/wenku/* and /favorite/wenku?params
+                'favorite-local': new RegExp(`^/favorite/local(/.*)?(\\?.*)?$`) // Matches /favorite/local and /favorite/local/* and /favorite/local?params
             };
             for (const [key, pattern] of Object.entries(patterns)) {
                 if (pattern.test(url)) {
@@ -577,7 +806,8 @@
             function undone(n) {
                 if (mode === "normal") {
                     const sOrG = (n.sakura ?? n.gpt) || 0;
-                    return n.total - sOrG;
+                    //Using max to deal with some sakura > total situation
+                    return Math.max(n.total - sOrG, 0);
                 }
                 return n.total;
             }
@@ -665,6 +895,18 @@
             return result;
         }
 
+        static async clickTaskMoveToTop(count, reserve=true) {
+            const extras = document.querySelectorAll('.n-thing-header__extra');
+            for (let i = 0; i < count;i++) {
+                const offset = reserve ? extras.length - i - 1 : i;
+                const container = extras[offset];
+                const buttons = container.querySelectorAll('button');
+                if (buttons.length) {
+                    buttons[0].click();
+                }
+            }
+        }
+
         static async clickButtons(name = '') {
             const btns = document.querySelectorAll('button');
             btns.forEach(btn => {
@@ -681,6 +923,18 @@
     class StorageUtils {
         static sakura = 'sakura-workspace';
         static gpt = 'gpt-workspace';
+        static updateUrl = [
+            'workspace/sakura',
+            'workspace/gpt'
+        ];
+
+        static async update() {
+            const storageKey = (window.location.pathname.includes('workspace/sakura') ? this.sakura : (window.location.pathname.includes('workspace/gpt') ? this.gpt : null));
+            if (!storageKey) return;
+
+            const data = await this._getData(storageKey);
+            await this._setData(storageKey, data);
+        }
 
         static async _setData(key, data) {
             localStorage.setItem(key, JSON.stringify(data));
@@ -767,7 +1021,6 @@
 
         static async addJobs(key, jobs = [], createAt = Date.now()) {
             let data = await this._getData(key);
-            console.log(jobs);
             const existingTasks = new Set(data.jobs.map(job => job.task));
             jobs.forEach(({ task, description }) => {
                 if (!existingTasks.has(task)) {
@@ -840,6 +1093,7 @@
 
             this._lastKeepRun = 0;
             this._lastVisRun = 0;
+            this._lastEndPoint = window.location.href;
 
             this.buildGUI();
             this.attachGlobalKeyBindings();
@@ -1343,6 +1597,10 @@
             }
             if (now - this._lastVisRun >= 250) {
                 this.updateModuleVisibility();
+                if (this._lastEndPoint != window.location.href) {
+                    StorageUtils.update();
+                    this._lastEndPoint = window.location.href;
+                }
                 this._lastVisRun = now;
             }
             this._pollTimer = setTimeout(() => {
@@ -1371,7 +1629,7 @@
                 const hdr = this.headerMap.get(mod);
                 if (!hdr) return;
                 const cont = hdr.parentElement;
-                const allowed = domainAllowed && isModuleEnabledByWhitelist(mod);
+                const allowed = domainAllowed && isModuleEnabledByWhitelist(mod) && !mod.hidden;
                 if (!allowed) {
                     cont.style.display = 'none';
                     if (mod.type === 'keep' && this.keepActiveSet.has(mod.name)) {
@@ -1448,7 +1706,7 @@
             }, 310);
         }
 
-        async fetch(url, bypass = false) {
+        async fetch(url, bypass = true) {
             if (bypass && this.token) {
                 const response = await fetch(url, {
                     method: 'GET',
