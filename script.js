@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NTR ToolBox
 // @namespace    http://tampermonkey.net/
-// @version      v0.6
+// @version      v0.7.2
 // @author       TheNano
 // @description  ToolBox for Novel Translate bot website
 // @match        https://books.fishhawk.top/*
@@ -10,6 +10,8 @@
 // @icon         https://github.com/LittleSurvival/NTR-ToolBox/blob/main/icon.jpg?raw=true
 // @grant        GM_openInTab
 // @license      All Rights Reserved
+// @downloadURL https://update.greasyfork.org/scripts/527754/NTR%20ToolBox.user.js
+// @updateURL https://update.greasyfork.org/scripts/527754/NTR%20ToolBox.meta.js
 // ==/UserScript==
 
 (function () {
@@ -21,8 +23,8 @@
 
     window._NTRToolBoxInstance = true;
 
-    const CONFIG_VERSION = 20;
-    const VERSION = 'v0.6';
+    const CONFIG_VERSION = 23;
+    const VERSION = 'v0.7.2';
     const CONFIG_STORAGE_KEY = 'NTR_ToolBox_Config';
     const IS_MOBILE = /Mobi|Android/i.test(navigator.userAgent);
     const domainAllowed = (location.hostname === 'books.fishhawk.top' || location.hostname === 'books1.fishhawk.top' || location.hostname === 'n.novelia.cc');
@@ -42,6 +44,9 @@
     }
     function newSelectSetting(nameDefault, arrOptions, valDefault) {
         return { name: nameDefault, type: 'select', value: valDefault, options: arrOptions };
+    }
+    function newTextareaSetting(nameDefault, strDefault) {
+        return { name: nameDefault, type: 'textarea', value: String(strDefault == null ? '' : strDefault) };
     }
     function getModuleSetting(mod, key) {
         if (!mod.settings) return undefined;
@@ -116,17 +121,36 @@
         type: 'onclick',
         whitelist: '/workspace',
         settings: [
+            newBooleanSetting('確認刪除', true),
             newStringSetting('排除', '共享,本机,AutoDL'),
             newStringSetting('bind', 'none'),
         ],
         run: async function (cfg) {
+            const confirmDelete = getModuleSetting(cfg, '確認刪除');
             const excludeStr = getModuleSetting(cfg, '排除') || '';
             const excludeArr = excludeStr.split(',').filter(x => x);
 
+            // Get current workers to show count
+            let currentWorkers = [];
+            const key = location.href.endsWith('gpt') ? StorageUtils.gpt : (location.href.endsWith('sakura') ? StorageUtils.sakura : null);
+            if (key) {
+                const data = await StorageUtils._getData(key);
+                currentWorkers = data.workers.filter(w => !excludeArr.includes(w.id));
+            }
+
+            if (confirmDelete && currentWorkers.length > 0) {
+                if (!confirm(`確定要刪除 ${currentWorkers.length} 個翻譯器嗎？`)) {
+                    NotificationUtils.showWarning('已取消刪除');
+                    return;
+                }
+            }
+
             if (location.href.endsWith('gpt')) {
-                StorageUtils.removeAllWorkers(StorageUtils.gpt, excludeArr);
+                await StorageUtils.removeAllWorkers(StorageUtils.gpt, excludeArr);
+                NotificationUtils.showSuccess('已刪除 GPT 翻譯器');
             } else if (location.href.endsWith('sakura')) {
-                StorageUtils.removeAllWorkers(StorageUtils.sakura, excludeArr);
+                await StorageUtils.removeAllWorkers(StorageUtils.sakura, excludeArr);
+                NotificationUtils.showSuccess('已刪除 Sakura 翻譯器');
             }
         }
     };
@@ -210,6 +234,7 @@
 
             const modeMap = { '常規': '常规', '過期': '过期', '重翻': '重翻' };
             const cnMode = modeMap[mode] || '常规';
+            const translateMode = SettingUtils.getTranslateMode(mode);
 
             switch (type) {
                 case 'wenkus': {
@@ -228,7 +253,7 @@
                                     const data = await response.json();
                                     const volumeIds = data.volumeJp.map(volume => volume.volumeId);
 
-                                    volumeIds.forEach(name => results.push({ task: TaskUtils.wenkuLinkBuilder(id, name, SettingUtils.getTranslateMode(mode)), description: name }))
+                                    volumeIds.forEach(name => results.push({ task: TaskUtils.wenkuLinkBuilder(id, name, translateMode), description: name }))
                                     success = true;
                                 } catch (error) {
                                     NotificationUtils.showError(`Failed to fetch data for ID ${id}, attempt ${attempts + 1}.`);
@@ -264,19 +289,22 @@
                             };
                         });
                         results = sepMode == '智能'
-                            ? await TaskUtils.assignTasksSmart(novels, smartJobLimit, smartChapterLimit, SettingUtils.getTranslateMode(mode))
-                            : await TaskUtils.assignTasksStatic(novels, pair, SettingUtils.getTranslateMode(mode));
+                            ? await TaskUtils.assignTasksSmart(novels, smartJobLimit, smartChapterLimit, translateMode)
+                            : await TaskUtils.assignTasksStatic(novels, pair, translateMode);
 
                         await StorageUtils.addJobs(StorageUtils.sakura, results);
                     } catch (error) {
                         errorFlag = true;
-                        NotificationUtils.showError(`Failed to fetch data for ID ${id}, attempt ${attempts + 1}.`)
+                        NotificationUtils.showError(`Failed to fetch web search results.`);
                     }
                     break;
                 }
                 case 'novel': {
                     try {
                         const targetSpan = Array.from(document.querySelectorAll('span.n-text')).find(span => /总计 (\d+) \/ 百度 (\d+) \/ 有道 (\d+) \/ GPT (\d+) \/ Sakura (\d+)/.test(span.textContent));
+                        if (!targetSpan) {
+                            throw Error('无法找到统计信息');
+                        }
                         const [_, total, , , , sakura] = targetSpan.textContent.match(/总计 (\d+) \/ 百度 (\d+) \/ 有道 (\d+) \/ GPT (\d+) \/ Sakura (\d+)/);
                         const url = window.location.pathname.split('/novel')[1];
                         const title = document.title;
@@ -284,8 +312,8 @@
 
                         const novels = [{ url: url, total: total, sakura: sakura, description: title }];
                         results = sepMode == '智能'
-                            ? await TaskUtils.assignTasksSmart(novels, smartJobLimit, smartChapterLimit, SettingUtils.getTranslateMode(mode))
-                            : await TaskUtils.assignTasksStatic(novels, pair, SettingUtils.getTranslateMode(mode));
+                            ? await TaskUtils.assignTasksSmart(novels, smartJobLimit, smartChapterLimit, translateMode)
+                            : await TaskUtils.assignTasksStatic(novels, pair, translateMode);
 
                         await StorageUtils.addJobs(StorageUtils.sakura, results);
                     } catch (error) {
@@ -319,11 +347,11 @@
                             });
                             novelCount = novels.length;
                             tasks = sepMode == '智能'
-                                ? await TaskUtils.assignTasksSmart(novels, smartJobLimit, smartChapterLimit, SettingUtils.getTranslateMode(mode))
-                                : await TaskUtils.assignTasksStatic(novels, pair, SettingUtils.getTranslateMode(mode));
+                                ? await TaskUtils.assignTasksSmart(novels, smartJobLimit, smartChapterLimit, translateMode)
+                                : await TaskUtils.assignTasksStatic(novels, pair, translateMode);
 
                             await StorageUtils.addJobs(StorageUtils.sakura, tasks);
-                            results.push(tasks);
+                            results.push(...tasks);
                             NotificationUtils.showSuccess(`成功排隊 ${3 * page + 1}-${3 * page + 3}頁, 共${tasks.length}個任務`);
                         } catch (error) {
                             console.log(error);
@@ -365,7 +393,7 @@
                                             const data = await response.json();
                                             const volumeIds = data.volumeJp.map(volume => volume.volumeId);
 
-                                            volumeIds.forEach(name => tasks.push({ task: TaskUtils.wenkuLinkBuilder(id, name, mode), description: name }))
+                                            volumeIds.forEach(name => tasks.push({ task: TaskUtils.wenkuLinkBuilder(id, name, translateMode), description: name }))
                                             success = true;
                                         } catch (error) {
                                             NotificationUtils.showError(`Failed to fetch data for ID ${id}, attempt ${attempts + 1}:`);
@@ -378,7 +406,7 @@
                                 })
                             );
                             await StorageUtils.addJobs(StorageUtils.sakura, tasks);
-                            results.push(tasks);
+                            results.push(...tasks);
                             NotificationUtils.showSuccess(`成功排隊 ${3 * page + 1}-${3 * page + 3}頁, 共${tasks.length}本小說`);
                         } catch (error) {
                             console.log(error);
@@ -394,8 +422,9 @@
                 default: { }
             }
             if (errorFlag) return;
-            const novels = new Set(results.map(result => result.description));
-            NotificationUtils.showSuccess(`排隊成功 : 共 ${novels.size} 本小說, 均分 ${results.length} 分段.`);
+            // Fix: Properly filter unique novels by description
+            const uniqueNovels = new Set(results.map(result => result.description));
+            NotificationUtils.showSuccess(`排隊成功 : 共 ${uniqueNovels.size} 本小說, 均分 ${results.length} 分段.`);
         }
     }
 
@@ -432,6 +461,7 @@
 
             const modeMap = { '常規': '常规', '過期': '过期', '重翻': '重翻' };
             const cnMode = modeMap[mode] || '常规';
+            const translateMode = SettingUtils.getTranslateMode(mode);
 
 
             switch (type) {
@@ -451,7 +481,7 @@
                                     const data = await response.json();
                                     const volumeIds = data.volumeJp.map(volume => volume.volumeId);
 
-                                    volumeIds.forEach(name => results.push({ task: TaskUtils.wenkuLinkBuilder(id, name, mode), description: name }))
+                                    volumeIds.forEach(name => results.push({ task: TaskUtils.wenkuLinkBuilder(id, name, translateMode), description: name }))
                                     success = true;
                                 } catch (error) {
                                     NotificationUtils.showError(`Failed to fetch data for ID ${id}, attempt ${attempts + 1}:`);
@@ -468,7 +498,7 @@
                 };
                 case 'wenku': {
                     await TaskUtils.clickButtons(cnMode);
-                    await TaskUtils.clickButtons('排队Sakura');
+                    await TaskUtils.clickButtons('排队GPT');
                     break;
                 }
                 case 'novels': {
@@ -487,19 +517,22 @@
                             };
                         });
                         results = sepMode == '智能'
-                            ? await TaskUtils.assignTasksSmart(novels, smartJobLimit, smartChapterLimit, SettingUtils.getTranslateMode(mode))
-                            : await TaskUtils.assignTasksStatic(novels, pair, SettingUtils.getTranslateMode(mode));
+                            ? await TaskUtils.assignTasksSmart(novels, smartJobLimit, smartChapterLimit, translateMode)
+                            : await TaskUtils.assignTasksStatic(novels, pair, translateMode);
 
                         await StorageUtils.addJobs(StorageUtils.gpt, results);
                     } catch (error) {
                         errorFlag = true;
-                        NotificationUtils.showError(`Failed to fetch data for ID ${id}, attempt ${attempts + 1}:`);
+                        NotificationUtils.showError(`Failed to fetch web search results.`);
                     }
                     break;
                 }
                 case 'novel': {
                     try {
                         const targetSpan = Array.from(document.querySelectorAll('span.n-text')).find(span => /总计 (\d+) \/ 百度 (\d+) \/ 有道 (\d+) \/ GPT (\d+) \/ Sakura (\d+)/.test(span.textContent));
+                        if (!targetSpan) {
+                            throw Error('无法找到统计信息');
+                        }
                         const [_, total, , , gpt] = targetSpan.textContent.match(/总计 (\d+) \/ 百度 (\d+) \/ 有道 (\d+) \/ GPT (\d+) \/ Sakura (\d+)/);
                         const url = window.location.pathname.split('/novel')[1];
 
@@ -509,8 +542,8 @@
                         const novels = [{ url: url, total: total, gpt: gpt, description: title }]
 
                         results = sepMode == '智能'
-                            ? await TaskUtils.assignTasksSmart(novels, smartJobLimit, smartChapterLimit, SettingUtils.getTranslateMode(mode))
-                            : await TaskUtils.assignTasksStatic(novels, pair, SettingUtils.getTranslateMode(mode));
+                            ? await TaskUtils.assignTasksSmart(novels, smartJobLimit, smartChapterLimit, translateMode)
+                            : await TaskUtils.assignTasksStatic(novels, pair, translateMode);
 
                         await StorageUtils.addJobs(StorageUtils.gpt, results);
                     } catch (error) {
@@ -544,11 +577,11 @@
                             });
                             novelCount = novels.length;
                             tasks = sepMode == '智能'
-                                ? await TaskUtils.assignTasksSmart(novels, smartJobLimit, smartChapterLimit, SettingUtils.getTranslateMode(mode))
-                                : await TaskUtils.assignTasksStatic(novels, pair, SettingUtils.getTranslateMode(mode));
+                                ? await TaskUtils.assignTasksSmart(novels, smartJobLimit, smartChapterLimit, translateMode)
+                                : await TaskUtils.assignTasksStatic(novels, pair, translateMode);
 
                             await StorageUtils.addJobs(StorageUtils.gpt, tasks);
-                            results.push(tasks);
+                            results.push(...tasks);
                             NotificationUtils.showSuccess(`成功排隊 ${3 * page + 1}-${3 * page + 3}頁, 共${novelCount}本小說`);
                         } catch (error) {
                             console.log(error);
@@ -590,7 +623,7 @@
                                             const data = await response.json();
                                             const volumeIds = data.volumeJp.map(volume => volume.volumeId);
 
-                                            volumeIds.forEach(name => tasks.push({ task: TaskUtils.wenkuLinkBuilder(id, name, mode), description: name }))
+                                            volumeIds.forEach(name => tasks.push({ task: TaskUtils.wenkuLinkBuilder(id, name, translateMode), description: name }))
                                             success = true;
                                         } catch (error) {
                                             NotificationUtils.showError(`Failed to fetch data for ID ${id}, attempt ${attempts + 1}:`);
@@ -603,7 +636,7 @@
                                 })
                             );
                             await StorageUtils.addJobs(StorageUtils.gpt, tasks);
-                            results.push(tasks);
+                            results.push(...tasks);
                             NotificationUtils.showSuccess(`成功排隊 ${3 * page + 1}-${3 * page + 3}頁, 共${tasks.length}本小說`);
                         } catch (error) {
                             console.log(error);
@@ -619,8 +652,9 @@
                 default: { }
             }
             if (errorFlag) return;
-            const novels = new Set(results.map(result => result.description));
-            NotificationUtils.showSuccess(`排隊成功 : 共 ${novels.size} 本小說, 均分 ${results.length} 分段.`);
+            // Fix: Properly filter unique novels by description
+            const uniqueNovels = new Set(results.map(result => result.description));
+            NotificationUtils.showSuccess(`排隊成功 : 共 ${uniqueNovels.size} 本小說, 均分 ${results.length} 分段.`);
         }
     }
 
@@ -687,6 +721,51 @@
         }
     };
 
+    const moduleClearJobs = {
+        name: '清空任務',
+        type: 'onclick',
+        whitelist: '/workspace/*',
+        settings: [
+            newBooleanSetting('確認清空', true),
+            newBooleanSetting('僅清空已完成', false),
+        ],
+        run: async function (cfg) {
+            const confirmClear = getModuleSetting(cfg, '確認清空');
+            const onlyCompleted = getModuleSetting(cfg, '僅清空已完成');
+
+            const key = window.location.pathname.includes('workspace/sakura') ? StorageUtils.sakura :
+                        (window.location.pathname.includes('workspace/gpt') ? StorageUtils.gpt : null);
+
+            if (!key) {
+                NotificationUtils.showError('無法確定工作區類型');
+                return;
+            }
+
+            const data = await StorageUtils._getData(key);
+
+            let jobsToRemove = [];
+            if (onlyCompleted) {
+                // 只清空已完成的 jobs（需要根据实际数据结构判断）
+                // 假设 jobs 中有 status 字段或通过其他方式判断
+                NotificationUtils.showWarning('僅清空已完成功能需配合網站API');
+                return;
+            } else {
+                jobsToRemove = data.jobs;
+            }
+
+            if (confirmClear && jobsToRemove.length > 0) {
+                if (!confirm(`確定要清空 ${jobsToRemove.length} 個任務嗎？此操作不可恢復！`)) {
+                    NotificationUtils.showWarning('已取消清空');
+                    return;
+                }
+            }
+
+            data.jobs = [];
+            await StorageUtils._setData(key, data);
+            NotificationUtils.showSuccess(`已清空 ${jobsToRemove.length} 個任務`);
+        }
+    };
+
     const moduleSyncStorage = {
         name: '資料同步',
         type: 'onclick',
@@ -699,6 +778,162 @@
         }
     }
 
+    const moduleFillGlossary = {
+        name: '填充术语表',
+        type: 'onclick',
+        whitelist: '/novel',
+        settings: [
+            newTextareaSetting('术语表', ''),
+            newBooleanSetting('追加模式', true),
+            newBooleanSetting('页面可视化反馈', true),
+            newStringSetting('bind', 'none'),
+        ],
+        run: async function (cfg) {
+            const glossaryText = getModuleSetting(cfg, '术语表') || '';
+            const isAppend = getModuleSetting(cfg, '追加模式');
+            const visualFeedback = getModuleSetting(cfg, '页面可视化反馈');
+
+            if (!glossaryText.trim()) {
+                NotificationUtils.showWarning('术语表为空');
+                return;
+            }
+
+            // Parse glossary
+            const newGlossary = {};
+            const delimiter = '=>';
+            glossaryText.split('\n').forEach(line => {
+                line = line.trim();
+                if (!line) return;
+                const parts = line.split(delimiter);
+                if (parts.length === 2) {
+                    newGlossary[parts[0].trim()] = parts[1].trim();
+                } else {
+                    try {
+                        const obj = JSON.parse(line);
+                        if (typeof obj === 'object') {
+                            Object.assign(newGlossary, obj);
+                        }
+                    } catch (e) { }
+                }
+            });
+
+            if (Object.keys(newGlossary).length === 0) {
+                NotificationUtils.showError('未能解析任何术语 (格式: 日文 => 中文)');
+                return;
+            }
+
+            // Find all novels on page and their DOM containers
+            const links = [...document.querySelectorAll('a')];
+            const novels = [];
+            const seen = new Set();
+            links.forEach(a => {
+                try {
+                    const url = new URL(a.href);
+                    if (url.origin !== window.location.origin) return;
+                    const match = url.pathname.match(/^\/novel\/([^/]+)\/([^/]+)$/);
+                    if (match) {
+                        const id = `${match[1]}/${match[2]}`;
+                        if (!seen.has(id)) {
+                            // Try to find the closest list item or card container
+                            let container = a.closest('n-list-item');
+                            if (!container) {
+                                container = a.closest('.n-list-item');
+                            }
+                            if (!container) {
+                                container = a.closest('.novel-card');
+                            }
+                            if (!container) {
+                                container = a.closest('div');
+                            }
+                            novels.push({ providerId: match[1], novelId: match[2], id, container });
+                            seen.add(id);
+                        }
+                    }
+                } catch (e) { }
+            });
+
+            if (novels.length === 0) {
+                NotificationUtils.showWarning('未在当前页面找到小说条目');
+                return;
+            }
+
+            if (!confirm(`确定要为当前页面的 ${novels.length} 本小说${isAppend ? '追加' : '填充'}术语表吗？\n(包含 ${Object.keys(newGlossary).length} 个术语)`)) {
+                return;
+            }
+
+            // Clear previous status badges if any
+            if (visualFeedback) {
+                document.querySelectorAll('.ntr-glossary-badge').forEach(el => el.remove());
+            }
+
+            let successCount = 0;
+            let failCount = 0;
+
+            const setNovelStatus = (container, status, message) => {
+                if (!visualFeedback || !container) return;
+                let badge = container.querySelector('.ntr-glossary-badge');
+                if (!badge) {
+                    badge = document.createElement('span');
+                    badge.className = 'ntr-glossary-badge';
+                    // Insert at a visible position: try to append to the first n-flex or the container itself
+                    const flex = container.querySelector('n-flex') || container.querySelector('.n-flex') || container;
+                    if (flex.firstElementChild) {
+                        flex.insertBefore(badge, flex.firstElementChild);
+                    } else {
+                        flex.appendChild(badge);
+                    }
+                }
+                badge.className = 'ntr-glossary-badge ntr-glossary-' + status;
+                badge.title = message;
+                const iconMap = { success: '✅', fail: '❌', pending: '⏳' };
+                badge.textContent = iconMap[status] || '⏳';
+            };
+
+            for (const novel of novels) {
+                if (visualFeedback && novel.container) {
+                    setNovelStatus(novel.container, 'pending', '正在填充术语表...');
+                }
+                try {
+                    let finalGlossary = newGlossary;
+
+                    if (isAppend) {
+                        const getRes = await script.fetch(`${window.location.origin}/api/novel/${novel.providerId}/${novel.novelId}`);
+                        if (getRes.ok) {
+                            const data = await getRes.json();
+                            finalGlossary = Object.assign({}, data.glossary || {}, newGlossary);
+                        } else {
+                            throw new Error('Fetch failed');
+                        }
+                    }
+
+                    const putRes = await script.fetch(`${window.location.origin}/api/novel/${novel.providerId}/${novel.novelId}/glossary`, true, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(finalGlossary)
+                    });
+
+                    if (putRes.ok) {
+                        successCount++;
+                        setNovelStatus(novel.container, 'success', `术语表填充成功 (+${Object.keys(newGlossary).length} 术语)`);
+                    } else {
+                        failCount++;
+                        setNovelStatus(novel.container, 'fail', `术语表填充失败: HTTP ${putRes.status}`);
+                    }
+                } catch (e) {
+                    console.error(`Failed to update glossary for ${novel.id}:`, e);
+                    failCount++;
+                    setNovelStatus(novel.container, 'fail', `术语表填充失败: ${e.message || '网络错误'}`);
+                }
+            }
+
+            if (failCount === 0) {
+                NotificationUtils.showSuccess(`成功填充 ${successCount} 本小说的术语表`);
+            } else {
+                NotificationUtils.showWarning(`填充完成: ${successCount} 成功, ${failCount} 失败`);
+            }
+        }
+    };
+
     const defaultModules = [
         moduleAddSakuraTranslator,
         moduleAddGPTTranslator,
@@ -707,6 +942,8 @@
         moduleQueueSakuraV2,
         moduleQueueGPTV2,
         moduleAutoRetry,
+        moduleClearJobs,
+        moduleFillGlossary,
         moduleSyncStorage,
     ];
 
@@ -758,37 +995,44 @@
 
         //return api link
         static webSearchApi(limit = 20) {
-            const urlParams = new URLSearchParams(location.search), page = Math.max(urlParams.get('page') - 1 || 0, 0);
-            const input = document.querySelector('input[placeholder="中/日文标题或作者"]');
-            let rawQuery = input ? input.value.trim() : '';
+            const urlParams = new URLSearchParams(location.search);
+            const page = Math.max(parseInt(urlParams.get('page')) - 1 || 0, 0);
+            const query = urlParams.get('query') || '';
+            const selected = urlParams.getAll('selected').map(Number);
 
-            const query = encodeURIComponent(rawQuery);
-            const selected = [...document.querySelectorAll('.n-text.__text-dark-131ezvy-p')].map(e => e.textContent.trim());
-
-            const sourceMap = {
-                Kakuyomu: 'kakuyomu',
-                '成为小说家吧': 'syosetu',
-                Novelup: 'novelup',
-                Hameln: 'hameln',
-                Pixiv: 'pixiv',
-                Alphapolis: 'alphapolis'
-            };
             const typeMap = { '连载中': '1', '已完结': '2', '短篇': '3', '全部': '0' };
             const levelMap = { '一般向': '1', 'R18': '2', '全部': '0' };
             const translateMap = { 'GPT': '1', 'Sakura': '2', '全部': '0' };
             const sortMap = { '更新': '0', '点击': '1', '相关': '2' };
-            const providers = Object.keys(sourceMap)
-                .filter(k => selected.includes(k))
-                .map(k => sourceMap[k])
-                .join(',') || 'kakuyomu,syosetu,novelup,hameln,pixiv,alphapolis';
-            const tKey = Object.keys(typeMap).find(x => selected.includes(x)) || '全部';
-            const lKey = Object.keys(levelMap).find(x => selected.includes(x)) || '全部';
-            const trKey = Object.keys(translateMap).find(x => selected.includes(x)) || '全部';
-            const sKey = Object.keys(sortMap).find(x => selected.includes(x)) || '更新';
 
-            return `/api/novel?page=${page}&pageSize=${limit}&query=${query}` +
-                `&provider=${encodeURIComponent(providers)}&type=${typeMap[tKey]}&level=${levelMap[lKey]}` +
-                `&translate=${translateMap[trKey]}&sort=${sortMap[sKey]}`;
+            // Map selected indices back to values if possible, or use default if URL is empty
+            // On n.novelia.cc, selected[0] is provider, [1] is type, [2] is level, [3] is translate, [4] is sort
+            const providerVal = selected[0] ?? 0xff; // 0xff is 'All'
+            const typeVal = selected[1] ?? 0;
+            const levelVal = selected[2] ?? 0;
+            const translateVal = selected[3] ?? 0;
+            const sortVal = selected[4] ?? 0;
+
+            // Convert provider bitmask back to string
+            const sourceMap = {
+                'kakuyomu': 1,
+                'syosetu': 2,
+                'novelup': 4,
+                'hameln': 8,
+                'pixiv': 16,
+                'alphapolis': 32
+            };
+            let providers = Object.keys(sourceMap)
+                .filter(k => (providerVal & sourceMap[k]))
+                .join(',');
+
+            if (providerVal === 0xff || !providers) {
+                providers = 'kakuyomu,syosetu,novelup,hameln,pixiv,alphapolis';
+            }
+
+            return `/api/novel?page=${page}&pageSize=${limit}&query=${encodeURIComponent(query)}` +
+                `&provider=${encodeURIComponent(providers)}&type=${typeVal}&level=${levelVal}` +
+                `&translate=${translateVal}&sort=${sortVal}`;
         }
 
         //return { task, description }
@@ -911,8 +1155,8 @@
     // Storage Utils
     // -----------------------------------
     class StorageUtils {
-        static sakura = 'sakura-workspace';
-        static gpt = 'gpt-workspace';
+        static sakura = location.hostname === 'n.novelia.cc' ? 'workspace-sakura' : 'sakura-workspace';
+        static gpt = location.hostname === 'n.novelia.cc' ? 'workspace-gpt' : 'workspace-gpt';
         static updateUrl = [
             'workspace/sakura',
             'workspace/gpt'
@@ -937,9 +1181,24 @@
         }
 
         static async _getData(key) {
-            let raw = localStorage.getItem(key);
-            if (raw) {
-                return JSON.parse(raw);
+            try {
+                let raw = localStorage.getItem(key);
+                if (raw) {
+                    const data = JSON.parse(raw);
+                    // 验证数据结构完整性
+                    if (!data.workers) data.workers = [];
+                    if (!data.jobs) data.jobs = [];
+                    if (!data.uncompletedJobs) data.uncompletedJobs = [];
+                    return data;
+                }
+            } catch (e) {
+                console.error('Failed to parse localStorage data for key:', key, e);
+                // 数据损坏时尝试修复或重置
+                try {
+                    localStorage.removeItem(key);
+                } catch (removeError) {
+                    console.error('Failed to remove corrupted data:', removeError);
+                }
             }
             return { workers: [], jobs: [], uncompletedJobs: [] };
         }
@@ -1203,9 +1462,9 @@
         }
 
         initToken() {
-            const authInfo = localStorage.getItem('authInfo');
-            if (authInfo) {
-                const parsedInfo = JSON.parse(authInfo);
+            const auth = localStorage.getItem('auth');
+            if (auth) {
+                const parsedInfo = JSON.parse(auth);
                 return parsedInfo.profile.token;
             }
             return null;
@@ -1387,7 +1646,10 @@
 
                     header.onclick = e => {
                         if (e.target.classList.contains('ntr-bind-button') || e.target === btn) return;
-                        this.handleModuleClick(mod, header);
+                        const stored = this.configuration.modules.find(m => m.name === mod.name);
+                        const cfg = stored || mod;
+                        NotificationUtils.showSuccess(`运行模块: ${mod.name}`);
+                        this.handleModuleClick(cfg, header);
                     };
                 } else {
                     header.oncontextmenu = e => {
@@ -1486,6 +1748,19 @@
                                         this.saveConfiguration();
                                     };
                                 }
+                                break;
+                            }
+                            case 'textarea': {
+                                inputEl = document.createElement('textarea');
+                                inputEl.value = s.value;
+                                inputEl.className = 'ntr-input';
+                                inputEl.style.height = '80px';
+                                inputEl.style.width = '180px';
+                                inputEl.style.resize = 'vertical';
+                                inputEl.onchange = () => {
+                                    s.value = inputEl.value;
+                                    this.saveConfiguration();
+                                };
                                 break;
                             }
                             default: {
@@ -1696,17 +1971,23 @@
             }, 310);
         }
 
-        async fetch(url, bypass = true) {
+        async fetch(url, bypass = true, options = {}) {
             if (bypass && this.token) {
-                const response = await fetch(url, {
-                    method: 'GET',
+                const fetchOptions = {
+                    method: options.method || 'GET',
                     headers: {
-                        'Authorization': `Bearer ${this.token}`
-                    }
-                });
+                        'Authorization': `Bearer ${this.token}`,
+                        ...(options.headers || {})
+                    },
+                    ...options
+                };
+                if (this.token && !fetchOptions.headers['Authorization']) {
+                    fetchOptions.headers['Authorization'] = `Bearer ${this.token}`;
+                }
+                const response = await fetch(url, fetchOptions);
                 return response;
             } else {
-                return await fetch(url);
+                return await fetch(url, options);
             }
         }
 
@@ -1844,6 +2125,36 @@
     }
     .ntr-notification-message.fade-out {
         opacity: 0;
+    }
+    /* Glossary Visual Feedback Badge Styles */
+    .ntr-glossary-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        font-size: 12px;
+        margin-right: 6px;
+        transition: all 0.3s ease;
+        cursor: help;
+        flex-shrink: 0;
+    }
+    .ntr-glossary-pending {
+        background: linear-gradient(135deg, #fbbf24, #f59e0b);
+        animation: ntr-pulse 1.5s infinite;
+    }
+    .ntr-glossary-success {
+        background: linear-gradient(135deg, #4ade80, #22c55e);
+        box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+    }
+    .ntr-glossary-fail {
+        background: linear-gradient(135deg, #ef4444, #dc2626);
+        box-shadow: 0 0 8px rgba(220, 38, 38, 0.5);
+    }
+    @keyframes ntr-pulse {
+        0%, 100% { transform: scale(1); opacity: 1; }
+        50% { transform: scale(0.9); opacity: 0.7; }
     }
     @media only screen and (max-width:600px) {
         #ntr-panel {
