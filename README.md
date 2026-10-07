@@ -1,3 +1,7 @@
+# This project is archived
+
+Please move to [novelia-toolbox](https://github.com/LittleSurvival/novelia-toolbox)
+
 # NTR ToolBox Userscript
 
 **Version:** v0.3.1-20250223  
